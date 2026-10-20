@@ -11,7 +11,7 @@ use crate::core::Core;
 use crate::font::{for_each_dot, text_width};
 use crate::layout::*;
 use crate::lcd::{Lcd, H as LH, W as LW};
-use crate::look::{Antenna, ButtonShape, Corners, Look, Pattern};
+use crate::look::{Antenna, ButtonShape, Corners, Look, Part, Pattern};
 use crate::overlay::{self, Env, Page};
 use crate::rng::Pcg32;
 use crate::sprite::Sprite;
@@ -152,12 +152,21 @@ impl Renderer {
             }
         }
         // icons
-        let states = core.icon_states(wall);
+        let mut states = core.icon_states(wall);
+        if core.overlay.page == Page::Part(Part::Icons) {
+            // while their colours are being changed, show a selected icon and the alert lit
+            states[5] = true;
+            states[9] = true;
+        }
         let rects = icon_rects();
         for (i, icon) in core.content.icons.iter().enumerate() {
             let (rx, ry, _, _) = rects[i];
-            let c = if states[i] { Color::from_rgba8(40, 42, 40, 255) } else { Color::from_rgba8(200, 198, 190, 255) };
-            draw_sprite(pm, icon, rx, ry, ICON_SCALE, c, ts);
+            let c = match (states[i], i) {
+                (false, _) => look.icon_color(),
+                (true, 9) => look.alert_color(),
+                (true, _) => look.selected_color(),
+            };
+            draw_sprite(pm, icon, rx, ry, ICON_SCALE, rgba(c, 255), ts);
         }
         // LCD dots, aligned to whole pixels so they stay crisp at any size
         let (_, lcd_off, lcd_on) = look.lcd.colors();
@@ -179,15 +188,43 @@ impl Renderer {
                 }
             }
         }
-        let tags = core.status_tags();
-        if !tags.is_empty() {
-            ptext(pm, &tags, FACE.0 + FACE.2 - 34.0, FACE.1 + 14.0, 2.0, Color::from_rgba8(200, 60, 60, 255), true, ts);
-        }
+        draw_status(pm, core, scale);
         if core.wants_text() {
             let y = FACE.1 + FACE.3 + 30.0;
             ptext(pm, "TYPE ON KEYBOARD", CX, y, 2.0, Color::WHITE, true, ts);
         }
     }
+}
+
+/// The time speed and mute, as a badge on the shell just above the faceplate: light text on a
+/// dark pill, in whole-pixel dots, so it reads on any body colour and at any size.
+fn draw_status(pm: &mut Pixmap, core: &Core, scale: f32) {
+    let s = &core.game.settings;
+    let fast = s.speed != 1;
+    let text = core.status_tags();
+    if text.is_empty() {
+        return;
+    }
+    let id = Transform::identity();
+    let d = (4.0 * scale).round().max(2.0);
+    // a fast-forward sign before the speed: two triangles, each 3 dots wide and 5 tall
+    let sign = if fast { 8.0 * d } else { 0.0 };
+    let (pad_x, pad_y) = (3.0 * d, 2.0 * d);
+    let w = sign + text_width(&text) as f32 * d + 2.0 * pad_x;
+    let h = 5.0 * d + 2.0 * pad_y;
+    let x = ((CX - VIEW.0) * scale - w / 2.0).round();
+    let y = ((face_rect(s.look.corners).1 - 9.0 - VIEW.1) * scale - h).round();
+    let ink = Color::from_rgba8(255, 214, 64, 255);
+    fill(pm, rounded(x, y, w, h, h / 2.0), Color::from_rgba8(24, 26, 36, 235), id, None);
+    stroke(pm, rounded(x, y, w, h, h / 2.0), Color::from_rgba8(255, 255, 255, 210), (1.5 * scale).max(1.0), id);
+    let (tx, ty) = (x + pad_x, y + pad_y);
+    if fast {
+        for k in 0..2 {
+            let x0 = tx + k as f32 * 3.0 * d;
+            fill(pm, poly(&[(x0, ty), (x0 + 3.0 * d, ty + 2.5 * d), (x0, ty + 5.0 * d)]), ink, id, None);
+        }
+    }
+    ptext(pm, &text, tx + sign, ty, d, ink, false, id);
 }
 
 fn draw_sprite(pm: &mut Pixmap, s: &Sprite, x: f32, y: f32, dot: f32, c: Color, ts: Transform) {
@@ -272,7 +309,7 @@ fn paint_shell(pm: &mut Pixmap, look: &Look, scale: f32) {
     }
 
     // faceplate and screen
-    let (fx, fy, fw, fh) = FACE;
+    let (fx, fy, fw, fh) = face_rect(look.corners);
     let r = look.corners.radius();
     let edge = look.edge.unwrap_or(darken(base, 0.45));
     fill(pm, rounded(fx - 5.0, fy - 5.0, fw + 10.0, fh + 10.0, r + 4.0), rgba(edge, 255), ts, None);
@@ -299,9 +336,7 @@ fn paint_shell(pm: &mut Pixmap, look: &Look, scale: f32) {
             ptext(pm, label, bx, y, 3.0, rgba(ink, 255), true, ts);
         }
     }
-    // the name is lighter than the body, or darker on a pale one
-    let name = if luma(base) > 0.75 { darken(base, 0.4) } else { lighten(base, 0.6) };
-    ptext(pm, "BYTEPET", CX, fy + fh + 14.0, 2.0, rgba(name, 255), true, ts);
+    ptext(pm, "BYTEPET", CX, fy + fh + 14.0, 2.0, rgba(look.name_color(), 255), true, ts);
 }
 
 /// The body's pattern, drawn through `mask`.

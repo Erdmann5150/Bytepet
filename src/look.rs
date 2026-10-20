@@ -147,6 +147,11 @@ impl Corners {
     pub fn radius(self) -> f32 {
         [36.0, 18.0, 4.0][self as usize]
     }
+    /// How far the faceplate's sides come in. The shell narrows towards the top, so the
+    /// sharper the corners, the further in they must sit to stay on it.
+    pub fn inset(self) -> f32 {
+        [0.0, 8.0, 14.0][self as usize]
+    }
 }
 
 /// The LCD's colours: the glass behind the dots, an unlit dot and a lit one.
@@ -201,7 +206,19 @@ pub struct Look {
     pub frame: Rgb,
     pub corners: Corners,
     pub lcd: Lcd,
+    /// The menu icons around the screen.
+    pub icons: Option<Rgb>,
+    /// The icon that is selected.
+    pub selected: Option<Rgb>,
+    /// The attention icon while the pet is calling.
+    pub alert: Option<Rgb>,
+    /// The BYTEPET printed under the faceplate.
+    pub name: Option<Rgb>,
 }
+
+/// The icons' colours when they are AUTO: faint when unlit, dark when lit.
+pub const ICON_OFF: Rgb = [200, 198, 190];
+pub const ICON_ON: Rgb = [40, 42, 40];
 
 impl Look {
     /// A plain shell of one colour with everything else as it always was.
@@ -222,6 +239,10 @@ impl Look {
             frame: GRAY,
             corners: Corners::Round,
             lcd: Lcd::Classic,
+            icons: None,
+            selected: None,
+            alert: None,
+            name: None,
         }
     }
     const fn with_pattern(mut self, p: Pattern) -> Look {
@@ -234,6 +255,21 @@ impl Look {
     }
     pub fn accent_color(&self) -> Rgb {
         self.accent.unwrap_or(self.pattern.default_accent())
+    }
+    pub fn icon_color(&self) -> Rgb {
+        self.icons.unwrap_or(ICON_OFF)
+    }
+    pub fn selected_color(&self) -> Rgb {
+        self.selected.unwrap_or(ICON_ON)
+    }
+    /// AUTO follows the selected colour.
+    pub fn alert_color(&self) -> Rgb {
+        self.alert.unwrap_or(self.selected_color())
+    }
+    /// AUTO is lighter than the body, or darker on a pale one.
+    pub fn name_color(&self) -> Rgb {
+        use crate::layout::{darken, lighten, luma};
+        self.name.unwrap_or(if luma(self.body) > 0.75 { darken(self.body, 0.4) } else { lighten(self.body, 0.6) })
     }
 
     /// The index of this part's current option, or `None` when the save holds a value the
@@ -261,6 +297,10 @@ impl Look {
             Field::Frame => color(self.frame),
             Field::Corners => Some(self.corners as usize),
             Field::Lcd => Some(self.lcd as usize),
+            Field::Icons => auto(self.icons),
+            Field::Selected => auto(self.selected),
+            Field::Alert => auto(self.alert),
+            Field::Name => auto(self.name),
         }
     }
 
@@ -285,6 +325,10 @@ impl Look {
             Field::Frame => self.frame = color,
             Field::Corners => self.corners = Corners::ALL[i],
             Field::Lcd => self.lcd = Lcd::ALL[i],
+            Field::Icons => self.icons = auto,
+            Field::Selected => self.selected = auto,
+            Field::Alert => self.alert = auto,
+            Field::Name => self.name = auto,
         }
     }
 
@@ -309,9 +353,12 @@ impl Look {
         for f in Field::ALL {
             look.set(f, rng.below(f.count()));
         }
-        // keep the extras that look odd when missing
+        // keep the extras that look odd when missing, and the icons and name readable
         look.gloss = true;
         look.letters = true;
+        for f in Part::Icons.fields() {
+            look.set(*f, 0);
+        }
         look
     }
 }
@@ -329,12 +376,13 @@ pub enum Part {
     Buttons,
     Antenna,
     Screen,
+    Icons,
 }
 
 impl Part {
-    pub const ALL: [Part; 4] = [Part::Body, Part::Buttons, Part::Antenna, Part::Screen];
+    pub const ALL: [Part; 5] = [Part::Body, Part::Buttons, Part::Antenna, Part::Screen, Part::Icons];
     pub fn name(self) -> &'static str {
-        ["BODY", "BUTTONS", "ANTENNA", "SCREEN"][self as usize]
+        ["BODY", "BUTTONS", "ANTENNA", "SCREEN", "ICONS"][self as usize]
     }
     pub fn fields(self) -> &'static [Field] {
         match self {
@@ -342,6 +390,7 @@ impl Part {
             Part::Buttons => &[Field::Buttons, Field::ButtonShape, Field::Letters],
             Part::Antenna => &[Field::Antenna, Field::AntennaColor, Field::Ring],
             Part::Screen => &[Field::Face, Field::Edge, Field::Frame, Field::Corners, Field::Lcd],
+            Part::Icons => &[Field::Icons, Field::Selected, Field::Alert, Field::Name],
         }
     }
 }
@@ -364,6 +413,10 @@ pub enum Field {
     Frame,
     Corners,
     Lcd,
+    Icons,
+    Selected,
+    Alert,
+    Name,
 }
 
 #[derive(Clone, Copy)]
@@ -375,7 +428,7 @@ enum Kind {
 }
 
 impl Field {
-    pub const ALL: [Field; 15] = [
+    pub const ALL: [Field; 19] = [
         Field::Body,
         Field::Pattern,
         Field::Accent,
@@ -391,12 +444,23 @@ impl Field {
         Field::Frame,
         Field::Corners,
         Field::Lcd,
+        Field::Icons,
+        Field::Selected,
+        Field::Alert,
+        Field::Name,
     ];
 
     fn kind(self) -> Kind {
         match self {
             Field::Body | Field::Face | Field::Frame => Kind::Color,
-            Field::Accent | Field::Buttons | Field::AntennaColor | Field::Edge => Kind::AutoColor,
+            Field::Accent
+            | Field::Buttons
+            | Field::AntennaColor
+            | Field::Edge
+            | Field::Icons
+            | Field::Selected
+            | Field::Alert
+            | Field::Name => Kind::AutoColor,
             Field::Gloss | Field::Letters | Field::Ring => Kind::Flag,
             Field::Pattern => Kind::Named(|i| Pattern::ALL[i].name(), Pattern::ALL.len()),
             Field::ButtonShape => Kind::Named(|i| ButtonShape::ALL[i].name(), ButtonShape::ALL.len()),
@@ -421,6 +485,10 @@ impl Field {
             Field::Frame => "Screen frame",
             Field::Corners => "Corners",
             Field::Lcd => "Screen color",
+            Field::Icons => "Icon color",
+            Field::Selected => "Selected icon",
+            Field::Alert => "Alert icon",
+            Field::Name => "BYTEPET text",
         }
     }
 
@@ -439,6 +507,10 @@ impl Field {
             Field::Frame => "FRAME",
             Field::Corners => "CORNERS",
             Field::Lcd => "LCD",
+            Field::Icons => "ICONS",
+            Field::Selected => "SELECT",
+            Field::Alert => "ALERT",
+            Field::Name => "NAME",
         }
     }
 

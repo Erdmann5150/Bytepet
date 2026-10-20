@@ -1,6 +1,9 @@
 //! The tray / menu-bar icon: click to show or hide the pet; its menu holds the settings, Help and Quit.
 //! Windows and macOS use tray-icon; Linux uses the StatusNotifierItem D-Bus protocol (ksni),
 //! which KDE, Xfce, Cinnamon and GNOME-with-AppIndicator understand.
+//!
+//! On Windows the menu stays open while you pick settings, so you can try several in a row;
+//! it closes when you click outside it (or on Show / hide, Help or Quit).
 
 use winit::event_loop::EventLoopProxy;
 
@@ -223,9 +226,16 @@ impl Tray {
         menu.append(&PredefinedMenuItem::separator()).ok()?;
         menu.append(&MenuItem::with_id(menu_id(TrayCmd::Quit), "Quit Bytepet", true, None)).ok()?;
 
-        let mut cmds = vec![TrayCmd::Toggle, TrayCmd::Help, TrayCmd::Quit];
+        // every item's command, in the order the items were added
+        let mut cmds = vec![TrayCmd::Toggle];
         cmds.extend(picks.iter().map(|&(_, c)| TrayCmd::Pick(c)));
         cmds.extend(flags.iter().map(|&(_, f)| TrayCmd::Flip(f)));
+        cmds.extend([TrayCmd::Help, TrayCmd::Quit]);
+        #[cfg(target_os = "windows")]
+        {
+            use tray_icon::menu::ContextMenu;
+            sticky::install(menu.hpopupmenu(), &cmds, proxy.clone());
+        }
         let p1 = proxy.clone();
         MenuEvent::set_event_handler(Some(move |e: MenuEvent| {
             if let Some(&cmd) = cmds.iter().find(|&&c| e.id == menu_id(c).as_str()) {
@@ -260,6 +270,134 @@ impl Tray {
         for (item, f) in &self.flags {
             item.set_checked(state.flag(*f));
         }
+    }
+}
+
+/// Windows closes a menu as soon as an item is clicked. A hook on the menu's message loop sees
+/// a click on a setting first, carries it out and swallows it, so the menu stays open; clicks
+/// elsewhere, and the other items, behave as usual.
+#[cfg(target_os = "windows")]
+mod sticky {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::ptr::{null, null_mut};
+
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
+    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CallNextHookEx, CheckMenuItem, GetClassNameW, GetMenuItemCount, GetMenuItemInfoW, GetWindowThreadProcessId,
+        MenuItemFromPoint, SendMessageW, SetWindowsHookExW, WindowFromPoint, HMENU, MENUITEMINFOW, MFS_CHECKED,
+        MFS_DISABLED, MFT_SEPARATOR, MF_BYPOSITION, MF_CHECKED, MF_UNCHECKED, MIIM_FTYPE, MIIM_ID, MIIM_STATE,
+        MIIM_SUBMENU, MN_GETHMENU, MSG, MSGF_MENU, WH_MSGFILTER, WM_LBUTTONUP,
+    };
+    use winit::event_loop::EventLoopProxy;
+
+    use super::{TrayCmd, UserEvent};
+
+    /// The window class of every popup menu.
+    const MENU_CLASS: &str = "#32768";
+
+    struct Sticky {
+        /// Menu item ids and what they do.
+        cmds: HashMap<u32, TrayCmd>,
+        proxy: EventLoopProxy<UserEvent>,
+    }
+
+    thread_local! {
+        static STICKY: RefCell<Option<Sticky>> = const { RefCell::new(None) };
+    }
+
+    /// `root` is the tray's menu and `cmds` its items' commands, depth first in the order they
+    /// were added. Must be called on the thread that shows the menu.
+    pub fn install(root: isize, cmds: &[TrayCmd], proxy: EventLoopProxy<UserEvent>) {
+        let mut ids = Vec::new();
+        unsafe { leaf_ids(root as HMENU, &mut ids) };
+        if ids.len() != cmds.len() {
+            // not laid out as expected: leave the menu to close as usual
+            return;
+        }
+        let cmds = ids.into_iter().zip(cmds.iter().copied()).collect();
+        STICKY.with(|s| *s.borrow_mut() = Some(Sticky { cmds, proxy }));
+        unsafe { SetWindowsHookExW(WH_MSGFILTER, Some(hook), null_mut(), GetCurrentThreadId()) };
+    }
+
+    unsafe fn item(menu: HMENU, pos: i32) -> Option<MENUITEMINFOW> {
+        let mut info: MENUITEMINFOW = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<MENUITEMINFOW>() as u32;
+        info.fMask = MIIM_ID | MIIM_SUBMENU | MIIM_FTYPE | MIIM_STATE;
+        (GetMenuItemInfoW(menu, pos as u32, 1, &mut info) != 0).then_some(info)
+    }
+
+    /// The ids of every item that isn't a submenu or a separator, depth first.
+    unsafe fn leaf_ids(menu: HMENU, out: &mut Vec<u32>) {
+        for pos in 0..GetMenuItemCount(menu) {
+            match item(menu, pos) {
+                Some(info) if !info.hSubMenu.is_null() => leaf_ids(info.hSubMenu, out),
+                Some(info) if info.fType & MFT_SEPARATOR == 0 => out.push(info.wID),
+                _ => {}
+            }
+        }
+    }
+
+    /// The menu shown in a window, if it is one of this thread's popup menus.
+    unsafe fn menu_of(win: HWND) -> Option<HMENU> {
+        if win.is_null() || GetWindowThreadProcessId(win, null_mut()) != GetCurrentThreadId() {
+            return None;
+        }
+        let mut name = [0u16; 16];
+        let n = GetClassNameW(win, name.as_mut_ptr(), name.len() as i32).max(0) as usize;
+        if String::from_utf16_lossy(&name[..n]) != MENU_CLASS {
+            return None;
+        }
+        let menu = SendMessageW(win, MN_GETHMENU, 0, 0) as HMENU;
+        (!menu.is_null()).then_some(menu)
+    }
+
+    unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if code == MSGF_MENU as i32 && lparam != 0 && on_menu_message(&*(lparam as *const MSG)) {
+            return 1;
+        }
+        CallNextHookEx(null_mut(), code, wparam, lparam)
+    }
+
+    /// Is this a click on a setting? Then tick it, send it on and report it handled.
+    unsafe fn on_menu_message(msg: &MSG) -> bool {
+        if msg.message != WM_LBUTTONUP {
+            return false;
+        }
+        let win = WindowFromPoint(msg.pt);
+        let Some(menu) = menu_of(win) else { return false };
+        let pos = MenuItemFromPoint(win, menu, msg.pt);
+        let Some(info) = (pos >= 0)
+            .then(|| item(menu, pos))
+            .flatten()
+            .filter(|i| i.hSubMenu.is_null() && i.fState & MFS_DISABLED == 0)
+        else {
+            return false;
+        };
+        let Some((cmd, proxy)) =
+            STICKY.with(|s| s.borrow().as_ref().and_then(|s| Some((*s.cmds.get(&info.wID)?, s.proxy.clone()))))
+        else {
+            return false;
+        };
+        let check = |on: bool| MF_BYPOSITION | if on { MF_CHECKED } else { MF_UNCHECKED };
+        match cmd {
+            // a submenu of choices has one ticked: this one now
+            TrayCmd::Pick(_) => {
+                for i in 0..GetMenuItemCount(menu) {
+                    CheckMenuItem(menu, i as u32, check(i == pos));
+                }
+            }
+            TrayCmd::Flip(_) => {
+                CheckMenuItem(menu, pos as u32, check(info.fState & MFS_CHECKED == 0));
+            }
+            // Show / hide, Help and Quit close the menu
+            _ => return false,
+        }
+        InvalidateRect(win, null(), 1);
+        let _ = proxy.send_event(UserEvent::Tray(cmd));
+        true
     }
 }
 

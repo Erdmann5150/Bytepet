@@ -92,6 +92,9 @@ fn every_shell_every_option_and_the_menu_render() {
     }
     // every option of every part draws, and a different option draws something different
     use bytepet::look::{Field, Look};
+    // with an icon selected and the pet calling, so their colours show
+    r.core.ui.sel = 0;
+    r.core.game.pet.call = Some(bytepet::sim::Call { reason: bytepet::sim::CallReason::Need, t: 0.0 });
     for f in Field::ALL {
         let mut seen = Vec::new();
         for i in 0..f.count() {

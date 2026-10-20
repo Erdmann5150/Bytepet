@@ -337,7 +337,23 @@ impl App {
             }
             TrayCmd::Quit => self.quit = true,
         }
+        // right away, as the menu may still be open
         self.tray_state = None;
+        self.sync_tray();
+        if let Some(w) = self.window() {
+            w.request_redraw();
+        }
+    }
+
+    /// Show the current settings in the tray menu, if they changed.
+    fn sync_tray(&mut self) {
+        let state = TrayState::new(&self.core.game.settings, self.login);
+        if self.tray_state.as_ref() != Some(&state) {
+            if let Some(t) = &self.tray {
+                t.sync(&state);
+            }
+            self.tray_state = Some(state);
+        }
     }
 
     /// Move the window with the mouse, from a press at `from` (window pixels). On Windows we
@@ -547,13 +563,7 @@ impl App {
         for e in self.core.take_notices() {
             self.notifier.event(&e, &self.core.game, &self.core.content);
         }
-        let state = TrayState::new(&self.core.game.settings, self.login);
-        if self.tray_state.as_ref() != Some(&state) {
-            if let Some(t) = &self.tray {
-                t.sync(&state);
-            }
-            self.tray_state = Some(state);
-        }
+        self.sync_tray();
         if self.core.ui.request.take().is_some() {
             self.show();
             self.core.overlay.open();
