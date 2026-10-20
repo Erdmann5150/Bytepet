@@ -315,7 +315,7 @@ menu = Table([[img("menu_open", 2.1 * inch),
                       ["SHELL", "Eight designs (see section 8)."],
                       ["SPEED", "1× is real time; 10×, 60× and 600× are for trying "
                                 "things out."],
-                      ["SOUND", "The beeps. Same as pressing A and C together."],
+                      ["SOUND", "The beeps: off, or 25%, 50%, 75% or 100% volume. A and C together mute and unmute."],
                       ["ON TOP", "Keep Bytepet above other windows."],
                       ["NOTIFY", "System notifications when your pet calls, gets sick, hatches, grows up, gets "
                                  "mail or leaves."],
@@ -334,7 +334,7 @@ story += [P("Living on your desktop", "h2"),
             "change it, or use A/Z and the arrow keys to move, B/Enter to choose and C/Esc to close:"),
           menu, Spacer(1, 6), sizes, Spacer(1, 4),
           tip("On Windows and macOS, Bytepet doesn't appear in the taskbar or Dock. Click its tray icon "
-              "(notification area or menu bar) to show or hide it; its menu has Settings and Quit. Starting "
+              "(notification area or menu bar) to show or hide it; right-click it for the settings, help and quit. Starting "
               "Bytepet again while it's running also brings it back.", "NOTE"),
           P("Linux notes", "h2"),
           B("On Wayland desktops (Fedora's and Ubuntu's default), apps can't keep themselves on top, pick where "
@@ -554,7 +554,7 @@ story += [screens([("lcd_town", "The Town menu"), ("lcd_clock", "B on the main s
                  ["PARTNER", "The matchmaker (section 10)."],
                  ["FRIENDS", "Everyone you've linked with and your friendship level."],
                  ["ALBUM", "Every past pet: its form, generation, age, job, partner and how its story ended."],
-                 ["SETUP", "SPEED (1×, 10×, 60×, 600×), SOUND, SHELL (8 designs), "
+                 ["SETUP", "SPEED (1×, 10×, 60×, 600×), SOUND (OFF or a volume), SHELL (8 designs), "
                            "WHEN OFF (RUNS or PAUSE: whether time passes while Bytepet is closed), MORE (opens the "
                            "desktop menu) and NEW EGG (start over)."]],
                 [1.1 * inch, CW - 1.1 * inch]),

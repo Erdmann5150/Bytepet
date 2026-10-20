@@ -11,7 +11,7 @@ use cpal::{SampleFormat, Stream};
 use bytepet::Tune;
 
 struct Synth {
-    notes: VecDeque<(f32, u32)>, // (frequency, samples left)
+    notes: VecDeque<(f32, u32, f32)>, // (frequency, samples left, gain)
     phase: f32,
     rate: f32,
     fade: u32,
@@ -19,8 +19,8 @@ struct Synth {
 
 impl Synth {
     fn next(&mut self) -> f32 {
-        let Some((freq, left)) = self.notes.front_mut() else { return 0.0 };
-        let f = *freq;
+        let Some((freq, left, gain)) = self.notes.front_mut() else { return 0.0 };
+        let (f, g) = (*freq, *gain);
         *left -= 1;
         let remaining = *left;
         if remaining == 0 {
@@ -30,7 +30,7 @@ impl Synth {
             return 0.0;
         }
         self.phase = (self.phase + f / self.rate) % 1.0;
-        let v = if self.phase < 0.5 { 0.12 } else { -0.12 };
+        let v = if self.phase < 0.5 { 0.12 * g } else { -0.12 * g };
         // short fade-out at the end of each note avoids clicks
         if remaining < self.fade {
             v * remaining as f32 / self.fade as f32
@@ -124,8 +124,10 @@ impl Audio {
         }
     }
 
-    pub fn play(&mut self, t: Tune) {
-        if !self.open() {
+    /// `volume` is in percent. Loudness follows its square, so the steps sound evenly spaced.
+    pub fn play(&mut self, t: Tune, volume: u32) {
+        let gain = (volume.min(100) as f32 / 100.0).powi(2);
+        if gain <= 0.0 || !self.open() {
             return;
         }
         let synth = self.synth.as_ref().unwrap();
@@ -133,7 +135,7 @@ impl Audio {
         let mut ms_total = 0;
         for &(f, ms) in t.notes() {
             let n = (s.rate * ms as f32 / 1000.0) as u32;
-            s.notes.push_back((f as f32, n.max(1)));
+            s.notes.push_back((f as f32, n.max(1), gain));
             ms_total += ms;
         }
         drop(s);

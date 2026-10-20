@@ -260,6 +260,20 @@ impl Core {
         }
     }
 
+    /// `None` mutes; a volume unmutes at that level and beeps so you hear how loud it is.
+    pub fn set_sound(&mut self, sound: Option<u32>) {
+        self.game.settings.set_sound(sound);
+        if sound.is_some() {
+            self.sfx.push(Tune::Ok);
+        }
+    }
+
+    /// Off, then each volume up to the loudest, then off again.
+    pub fn cycle_sound(&mut self) {
+        let next = self.game.settings.next_sound();
+        self.set_sound(next);
+    }
+
     pub fn cycle_speed(&mut self) {
         use crate::screens::town::SPEEDS;
         let s = &mut self.game.settings;

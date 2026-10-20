@@ -422,7 +422,7 @@ impl Screen for Setup {
                         let k = SPEEDS.iter().position(|&x| x == s.speed).unwrap_or(0);
                         s.speed = SPEEDS[(k + 1) % SPEEDS.len()];
                     }
-                    "SOUND" => s.muted = !s.muted,
+                    "SOUND" => s.set_sound(s.next_sound()),
                     "SHELL" => s.shell = (s.shell + 1) % SHELL_COUNT,
                     "WHENOFF" => s.run_away = !s.run_away,
                     "MORE" => cx.ui.request = Some(Request::Settings),
@@ -448,7 +448,7 @@ impl Screen for Setup {
         let s = &cx.game.settings;
         let (a, b) = match SETUP_ROWS[self.i] {
             "SPEED" => ("SPEED".to_string(), format!("{}X", s.speed)),
-            "SOUND" => ("SOUND".to_string(), if s.muted { "OFF" } else { "ON" }.to_string()),
+            "SOUND" => ("SOUND".to_string(), s.sound_label()),
             "SHELL" => ("SHELL".to_string(), crate::layout::SHELLS[(s.shell % SHELL_COUNT) as usize].name.to_string()),
             "WHENOFF" => ("WHEN OFF".to_string(), if s.run_away { "RUNS" } else { "PAUSE" }.to_string()),
             "MORE" => ("MORE".to_string(), "B:MENU".to_string()),
