@@ -237,6 +237,8 @@ impl Default for UiSettings {
 pub struct Settings {
     pub speed: u32,
     pub muted: bool,
+    /// Loudness in percent while not muted; one of [`VOLUMES`] unless a save says otherwise.
+    pub volume: u32,
     pub shell: u32,
     /// Keep living while the app is closed.
     pub run_away: bool,
@@ -245,7 +247,41 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { speed: 1, muted: false, shell: 0, run_away: true, ui: UiSettings::default() }
+        Settings { speed: 1, muted: false, volume: 100, shell: 0, run_away: true, ui: UiSettings::default() }
+    }
+}
+
+/// The volume steps the menus offer, in percent.
+pub const VOLUMES: [u32; 4] = [25, 50, 75, 100];
+
+impl Settings {
+    /// The sound as the menus show it: `None` when muted, else the volume.
+    pub fn sound(&self) -> Option<u32> {
+        (!self.muted).then_some(self.volume)
+    }
+
+    /// `None` mutes; a volume unmutes at that level.
+    pub fn set_sound(&mut self, sound: Option<u32>) {
+        match sound {
+            None => self.muted = true,
+            Some(v) => {
+                self.muted = false;
+                self.volume = v.min(100);
+            }
+        }
+    }
+
+    /// What a SOUND row steps to: off, then each volume up to the loudest, then off again.
+    pub fn next_sound(&self) -> Option<u32> {
+        match self.sound() {
+            None => Some(VOLUMES[0]),
+            Some(v) => VOLUMES.iter().copied().find(|&x| x > v),
+        }
+    }
+
+    /// "OFF" or the volume, e.g. "75%".
+    pub fn sound_label(&self) -> String {
+        self.sound().map_or("OFF".into(), |v| format!("{v}%"))
     }
 }
 

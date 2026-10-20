@@ -72,7 +72,7 @@ pub fn items(core: &Core, env: &Env) -> Vec<Item> {
         Item { label: "SIZE", value: size_name(s.ui.scale).into(), act: Act::Size },
         Item { label: "SHELL", value: crate::layout::shell(s.shell).name.into(), act: Act::Shell },
         Item { label: "SPEED", value: format!("{}X", s.speed), act: Act::Speed },
-        Item { label: "SOUND", value: onoff(!s.muted), act: Act::Sound },
+        Item { label: "SOUND", value: s.sound_label(), act: Act::Sound },
         Item { label: "ON TOP", value: onoff(s.ui.on_top), act: Act::OnTop },
         Item { label: "NOTIFY", value: onoff(s.ui.notify), act: Act::Notify },
         Item { label: "AT LOGIN", value: onoff(env.login), act: Act::Login },
@@ -154,7 +154,7 @@ pub fn activate(core: &mut Core, env: &Env, act: Act) -> Option<DesktopCmd> {
         }
         Act::Shell => core.next_shell(),
         Act::Speed => core.cycle_speed(),
-        Act::Sound => core.toggle_mute(),
+        Act::Sound => core.cycle_sound(),
         Act::OnTop => {
             s.ui.on_top = !s.ui.on_top;
             return Some(DesktopCmd::SetOnTop(s.ui.on_top));
@@ -168,6 +168,42 @@ pub fn activate(core: &mut Core, env: &Env, act: Act) -> Option<DesktopCmd> {
         }
         Act::Quit => return Some(DesktopCmd::Quit),
         Act::Close => core.overlay.close(),
+    }
+    None
+}
+
+/// A setting picked by value, as the tray menu offers them (the menu above steps through values).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Choice {
+    /// An index into [`SIZES`].
+    Size(usize),
+    Shell(u32),
+    Speed(u32),
+    /// `None` is off, otherwise a volume in percent.
+    Sound(Option<u32>),
+    OnTop(bool),
+    Notify(bool),
+    Login(bool),
+}
+
+/// Apply a [`Choice`]. Like [`activate`], what only the desktop shell can do is returned.
+pub fn choose(core: &mut Core, c: Choice) -> Option<DesktopCmd> {
+    let s = &mut core.game.settings;
+    match c {
+        Choice::Size(i) => {
+            let scale = SIZES[i.min(SIZES.len() - 1)].1;
+            s.ui.scale = scale;
+            return Some(DesktopCmd::SetScale(scale));
+        }
+        Choice::Shell(i) => s.shell = i % crate::layout::SHELLS.len() as u32,
+        Choice::Speed(x) => s.speed = x,
+        Choice::Sound(v) => core.set_sound(v),
+        Choice::OnTop(on) => {
+            s.ui.on_top = on;
+            return Some(DesktopCmd::SetOnTop(on));
+        }
+        Choice::Notify(on) => s.ui.notify = on,
+        Choice::Login(on) => return Some(DesktopCmd::SetLogin(on)),
     }
     None
 }
@@ -354,5 +390,44 @@ mod tests {
         // a click outside the panel closes the menu
         click(&mut core, &env, 1.0, 1.0, w, h);
         assert!(!core.overlay.is_open());
+    }
+
+    #[test]
+    fn sound_steps_through_the_volumes() {
+        let content = crate::content::Content::builtin();
+        let game = crate::sim::Game::new(&content, crate::rng::Pcg32::new(1));
+        let mut core = Core::new(content, game);
+        let env = Env { login: false, hide_label: "MINIMIZE" };
+        let sound = |core: &Core| items(core, &env)[3].value.clone();
+        assert_eq!(sound(&core), "100%");
+        let mut seen = Vec::new();
+        for _ in 0..5 {
+            activate(&mut core, &env, Act::Sound);
+            seen.push(sound(&core));
+        }
+        assert_eq!(seen, ["OFF", "25%", "50%", "75%", "100%"]);
+        // muting keeps the volume for when the sound comes back
+        choose(&mut core, Choice::Sound(Some(50)));
+        core.toggle_mute();
+        assert_eq!(sound(&core), "OFF");
+        core.toggle_mute();
+        assert_eq!(sound(&core), "50%");
+    }
+
+    #[test]
+    fn choices_set_values_directly() {
+        let content = crate::content::Content::builtin();
+        let game = crate::sim::Game::new(&content, crate::rng::Pcg32::new(1));
+        let mut core = Core::new(content, game);
+        assert_eq!(choose(&mut core, Choice::Size(3)), Some(DesktopCmd::SetScale(1.0)));
+        assert_eq!(core.game.settings.ui.scale, 1.0);
+        choose(&mut core, Choice::Shell(5));
+        choose(&mut core, Choice::Speed(60));
+        choose(&mut core, Choice::Sound(None));
+        assert_eq!(choose(&mut core, Choice::OnTop(false)), Some(DesktopCmd::SetOnTop(false)));
+        choose(&mut core, Choice::Notify(false));
+        let s = &core.game.settings;
+        assert_eq!((s.shell, s.speed, s.muted, s.ui.on_top, s.ui.notify), (5, 60, true, false, false));
+        assert_eq!(choose(&mut core, Choice::Login(true)), Some(DesktopCmd::SetLogin(true)));
     }
 }
