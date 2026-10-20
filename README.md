@@ -21,12 +21,23 @@ Download the build for your OS from the [latest release](https://github.com/Erdm
 | macOS 11+ (Intel and Apple Silicon) | `bytepet-…-macos-universal.zip` | Unzip and move `Bytepet.app` to Applications. The first time, right-click it and choose *Open*. |
 | Linux x86_64 | `bytepet-…-linux-x86_64.tar.gz` | Extract it and run `./install.sh`, which installs to `~/.local` with a menu entry. You can also run `./bytepet` directly. |
 
-It's a single program of about 8 MB with nothing else to install. On Linux it needs
-glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later).
+It's a single small program with nothing else to install. On Linux it needs glibc 2.35 or
+newer (Ubuntu 22.04, Debian 12, Fedora 36 and later). The builds aren't code-signed, which is
+why Windows and macOS warn the first time you run it.
 
 Every download includes the [Player's Manual](https://github.com/Erdmann5150/Bytepet/releases/latest/download/Bytepet_Manual.pdf)
 and a two-page [Quick Reference](https://github.com/Erdmann5150/Bytepet/releases/latest/download/Bytepet_Quick_Reference.pdf)
-card as PDFs, and the links here always get the newest ones.
+card as PDFs. These links always point to the newest versions.
+
+### Uninstalling
+
+- **Windows:** delete the program folder. To show notifications as "Bytepet", it also
+  registers `HKCU\Software\Classes\AppUserModelId\Bytepet.Desktop` and keeps
+  `bytepet-icon.png` in the save folder, so delete those too.
+- **macOS:** delete `Bytepet.app`.
+- **Linux:** run `./install.sh --remove`.
+
+Your save stays where it is (see [Saves](#saves)). Delete it too if you want a clean slate.
 
 ## On your desktop
 
@@ -87,7 +98,7 @@ also keeps running while Bytepet is closed, up to 14 days. To pause instead, set
 |---|---|---|
 | Egg | 1 minute | Name your pet first |
 | Baby | 1 hour | Needs constant care; care mistakes here choose between two children |
-| Child | 1 day | Games, mail and school unlock |
+| Child | 1 day | Games, mail, school and linking unlock |
 | Teen | 2 days | The highest skill decides the path when it grows up |
 | Adult | from day 3 | Jobs; the matchmaker from age 5 |
 | Senior | age 8 if unmarried | Can only marry another senior, and that pairing produces a rare egg |
@@ -114,8 +125,8 @@ There are 23 characters in all.
 quiz and WORK appears in the game menu, playable once every 2 hours. Office, Scientist,
 Chef, Firefighter and Rock Star each have their own game.
 
-**Town.** Mail, the shop (food, toys, a medkit), your items, the matchmaker, the friends
-list, an album of past generations, and setup.
+**Town.** Mail, the shop (food, toys, a medkit), your items, PARTNER (the matchmaker), the
+friends list, an album of past generations, and setup.
 
 ## Linking two Bytepets
 
@@ -161,8 +172,9 @@ three text files:
 bytepet --export-content <save folder>/content
 ```
 
-This writes `characters.toml`, `props.toml` and `game.toml` next to your save. Edit them
-and restart Bytepet; delete a file to go back to the built-in version. Every sprite is a
+This writes `characters.toml`, `props.toml` and `game.toml` into a `content` folder next to
+your save (`bytepet --paths` shows where). Edit them and restart Bytepet. To go back to the
+built-in version of a file, delete it. Every sprite is a
 16×16 grid of `#` and `.`, and the comments at the top of each file explain the format. If
 a file has a mistake, Bytepet falls back to the built-in content and tells you what's wrong.
 
@@ -183,41 +195,42 @@ ALSA headers: `sudo apt install libasound2-dev pkg-config` (Debian, Ubuntu) or
 `sudo dnf install alsa-lib-devel` (Fedora).
 
 ```bash
-cargo run --release                                             # build and run
-cargo test --no-default-features                                # tests, no desktop libraries needed
-cargo test --no-default-features -- --ignored                   # plus a long random-input fuzz
-cargo run --example export_art --no-default-features -- art/    # every sprite and screen as PNG
+cargo run --release                                                     # build and run
+cargo test --no-default-features                                        # tests, no desktop libraries needed
+cargo test --no-default-features --test robustness -- --ignored         # the long random-input fuzz
+cargo fmt --check && cargo clippy --all-targets -- -D warnings          # the lint CI enforces
+cargo run --example export_art --no-default-features -- art/            # every sprite and screen as PNG
 ```
 
-CI runs the tests on all three platforms and builds the packages and the two PDFs. Pushing a
-tag such as `v2.1.0` publishes a GitHub release with all of them attached. To build the PDFs
-yourself (Python 3.11+ and `pip install reportlab`):
+To build the manual and quick reference PDFs, export the art as above, then run this
+(needs Python 3.11+ and `pip install reportlab`):
 
 ```bash
-cargo run --example export_art --no-default-features -- art/
 python3 tools/build_manual.py art/ dist/
 ```
+
+CI runs the tests on all three platforms, lints, and builds the packages and the two PDFs.
+Pushing a tag such as `v2.1.0` publishes a GitHub release with all of them attached.
 
 ```
 content/          characters, props and game rules (TOML; embedded, overridable)
 src/
   sim.rs          the pet simulation: timers, care, evolution, jobs, mail, marriage
+  content.rs      loads the content files and any mods
   screens/        every LCD screen as a screen stack
   games/          the mini-games
   link.rs net.rs  the LINK menu and LAN networking
   core.rs         ties sim, screens, input and saving together, no OS dependencies
   render.rs       draws the device; layout.rs has its geometry and shells
+  lcd.rs font.rs  the dot-matrix screen and its font
   save.rs         versioned save files
-  overlay.rs      the right-click settings menu
+  instance.rs     one running copy per save file
+  overlay.rs      the right-click settings menu and help pages
+  main.rs         command line, then hands off to desktop/
   desktop/        window, tray, notifications, sound, autostart, click-through
 tests/            end-to-end flows, two-device link tests, fuzzing
+examples/         export_art.rs: sprites and screens as PNG, for the manual
 tools/            build_manual.py: the manual and quick reference PDFs, from the content and art
 packaging/        macOS Info.plist, Linux .desktop file and installer
+assets/           app icons
 ```
-
-## Known limitations
-
-- **No code signing.** Windows SmartScreen and macOS Gatekeeper warn the first time you run it.
-- **Uninstalling on Windows:** to show notifications as "Bytepet", it registers
-  `HKCU\Software\Classes\AppUserModelId\Bytepet.Desktop` and keeps a copy of its icon in the
-  save folder. Delete both along with the program.
