@@ -2,6 +2,8 @@
 //!
 //! Schema history:
 //!   2 - `{"schema": 2, "saved_at": ..., "game": {...}}`, the first released format.
+//!   3 - `settings.look` holds every part of the device's look; `settings.shell` is now just
+//!       the preset last picked. Older saves get the look of the shell they had.
 //!
 //! When the format changes, bump `SCHEMA` and add a `migrate_vN` that `from_json` runs on
 //! older files, so existing saves keep working.
@@ -13,7 +15,7 @@ use serde_json::{json, Value};
 
 use crate::sim::Game;
 
-pub const SCHEMA: u64 = 2;
+pub const SCHEMA: u64 = 3;
 
 #[derive(Serialize, Deserialize)]
 pub struct SaveFile {
@@ -64,13 +66,28 @@ pub fn default_save_path() -> PathBuf {
 
 /// Parse save JSON of any known schema into the current format.
 pub fn from_json(text: &str) -> Result<SaveFile, LoadError> {
-    let v: Value = serde_json::from_str(text).map_err(|e| LoadError::Corrupt(e.to_string()))?;
+    let mut v: Value = serde_json::from_str(text).map_err(|e| LoadError::Corrupt(e.to_string()))?;
     let schema = v.get("schema").and_then(|s| s.as_u64()).unwrap_or(0);
     if schema > SCHEMA {
         return Err(LoadError::TooNew(schema));
     }
-    // future: if schema < 3 { v = migrate_v2(v); } ...
+    if schema < 3 {
+        migrate_v2(&mut v);
+    }
     serde_json::from_value(v).map_err(|e| LoadError::Corrupt(e.to_string()))
+}
+
+/// Schema 2 kept only a shell number; give the save that shell's look.
+fn migrate_v2(v: &mut Value) {
+    let Some(settings) = v.pointer_mut("/game/settings").and_then(Value::as_object_mut) else { return };
+    if settings.contains_key("look") {
+        return;
+    }
+    let shell = settings.get("shell").and_then(Value::as_u64).unwrap_or(0);
+    let look = crate::look::PRESETS[shell as usize % crate::look::PRESETS.len()].look;
+    if let Ok(look) = serde_json::to_value(look) {
+        settings.insert("look".into(), look);
+    }
 }
 
 pub fn load(path: &Path) -> Result<SaveFile, LoadError> {
@@ -131,5 +148,22 @@ mod tests {
         let s = from_json(r#"{"schema": 2, "saved_at": 0, "game": {"pet": {"name": "X"}}}"#).unwrap();
         assert_eq!(s.game.pet.name, "X");
         assert_eq!(s.game.settings.speed, 1);
+    }
+
+    #[test]
+    fn a_schema_2_save_keeps_its_shell() {
+        use crate::look::{Pattern, PRESETS};
+        let s = from_json(r#"{"schema": 2, "saved_at": 0, "game": {"settings": {"shell": 5}}}"#).unwrap();
+        assert_eq!(s.game.settings.shell, 5);
+        assert_eq!(s.game.settings.look, PRESETS[5].look);
+        assert_eq!(s.game.settings.look.pattern, Pattern::Flame);
+        assert_eq!(s.game.settings.shell_name(), "FLAME");
+        // and a customised look survives a round trip
+        let c = Content::builtin();
+        let mut g = Game::new(&c, Pcg32::new(3));
+        g.settings.look.step(crate::look::Field::Antenna, 2);
+        let back = from_json(&to_json(&g, 1.0)).unwrap();
+        assert_eq!(back.game.settings.look, g.settings.look);
+        assert_eq!(back.game.settings.shell_name(), "CUSTOM");
     }
 }

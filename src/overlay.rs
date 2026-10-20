@@ -1,8 +1,12 @@
 //! The right-click settings menu, drawn inside the widget (so it works the same on every OS,
 //! with no native menu toolkit). Items that only the desktop shell can carry out are returned
 //! as `DesktopCmd`s.
+//!
+//! The SHELL row opens a page of its own: a preset, then one page per part of the device
+//! (body, buttons, antenna, screen) where each setting steps through its options.
 
 use crate::core::Core;
+use crate::look::{Field, Look, Part};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Page {
@@ -10,6 +14,9 @@ pub enum Page {
     Closed,
     Menu,
     Help,
+    /// The preset and the list of parts.
+    Shell,
+    Part(Part),
 }
 
 #[derive(Default, Debug, Clone)]
@@ -33,6 +40,15 @@ pub enum Act {
     Hide,
     Quit,
     Close,
+    /// The next preset look.
+    Preset,
+    /// Open a part's page.
+    Part(Part),
+    /// The next option of one setting.
+    Field(Field),
+    Random,
+    /// Up one page.
+    Back,
 }
 
 /// What the desktop shell must do after a menu choice.
@@ -67,10 +83,30 @@ pub fn size_name(scale: f32) -> &'static str {
 
 pub fn items(core: &Core, env: &Env) -> Vec<Item> {
     let s = &core.game.settings;
+    let back = Item { label: "BACK", value: String::new(), act: Act::Back };
+    match core.overlay.page {
+        Page::Shell => {
+            let mut v = vec![Item { label: "PRESET", value: s.shell_name().into(), act: Act::Preset }];
+            v.extend(Part::ALL.iter().map(|&p| Item { label: p.name(), value: ">".into(), act: Act::Part(p) }));
+            v.push(Item { label: "RANDOM", value: String::new(), act: Act::Random });
+            v.push(back);
+            return v;
+        }
+        Page::Part(p) => {
+            let mut v: Vec<Item> = p
+                .fields()
+                .iter()
+                .map(|&f| Item { label: f.label(), value: s.look.value_name(f).into(), act: Act::Field(f) })
+                .collect();
+            v.push(back);
+            return v;
+        }
+        Page::Menu | Page::Help | Page::Closed => {}
+    }
     let onoff = |b: bool| if b { "ON".to_string() } else { "OFF".to_string() };
     vec![
         Item { label: "SIZE", value: size_name(s.ui.scale).into(), act: Act::Size },
-        Item { label: "SHELL", value: crate::layout::shell(s.shell).name.into(), act: Act::Shell },
+        Item { label: "SHELL", value: s.shell_name().into(), act: Act::Shell },
         Item { label: "SPEED", value: format!("{}X", s.speed), act: Act::Speed },
         Item { label: "SOUND", value: s.sound_label(), act: Act::Sound },
         Item { label: "ON TOP", value: onoff(s.ui.on_top), act: Act::OnTop },
@@ -108,7 +144,7 @@ pub const HELP_PAGES: [(&str, &[&str]); 2] = [
 ];
 
 /// Characters per line: the longest label, two spaces and its value must fit.
-pub const COLS: usize = 13;
+pub const COLS: usize = 15;
 /// Lines per page: the menu's items. Help pages use the same panel.
 pub const ROWS: usize = 11;
 
@@ -139,6 +175,41 @@ impl Overlay {
         self.page = Page::Closed;
         self.hover = None;
     }
+    fn go(&mut self, page: Page, hover: usize) {
+        self.page = page;
+        self.hover = Some(hover);
+    }
+    /// Up one page: a part's page goes back to the SHELL page, that to the menu, and the menu
+    /// (or help) closes.
+    pub fn back(&mut self) {
+        match self.page {
+            Page::Part(p) => self.go(Page::Shell, 1 + p as usize),
+            Page::Shell => self.go(Page::Menu, 1),
+            _ => self.close(),
+        }
+    }
+    /// Is this a page of rows to pick from?
+    pub fn has_rows(&self) -> bool {
+        matches!(self.page, Page::Menu | Page::Shell | Page::Part(_))
+    }
+    /// How many rows the page has.
+    pub fn rows(&self) -> usize {
+        match self.page {
+            Page::Menu => ROWS,
+            Page::Shell => Part::ALL.len() + 3,
+            Page::Part(p) => p.fields().len() + 1,
+            Page::Help | Page::Closed => 0,
+        }
+    }
+    /// The panel's title.
+    pub fn title(&self) -> &'static str {
+        match self.page {
+            Page::Closed | Page::Menu => "BYTEPET",
+            Page::Help => HELP_PAGES[self.help.min(HELP_PAGES.len() - 1)].0,
+            Page::Shell => "SHELL",
+            Page::Part(p) => p.name(),
+        }
+    }
 }
 
 /// Carry out a menu choice. Settings stored in the game are changed here; the rest is
@@ -152,7 +223,18 @@ pub fn activate(core: &mut Core, env: &Env, act: Act) -> Option<DesktopCmd> {
             s.ui.scale = next;
             return Some(DesktopCmd::SetScale(next));
         }
-        Act::Shell => core.next_shell(),
+        Act::Shell => core.overlay.go(Page::Shell, 0),
+        Act::Preset => s.next_shell(),
+        Act::Part(p) => core.overlay.go(Page::Part(p), 0),
+        Act::Field(f) => s.look.step(f, 1),
+        Act::Random => {
+            let mut rng = crate::rng::Pcg32::new(crate::core::now_unix().to_bits());
+            let old = s.look;
+            while s.look == old {
+                s.look = Look::random(&mut rng);
+            }
+        }
+        Act::Back => core.overlay.back(),
         Act::Speed => core.cycle_speed(),
         Act::Sound => core.cycle_sound(),
         Act::OnTop => {
@@ -172,12 +254,31 @@ pub fn activate(core: &mut Core, env: &Env, act: Act) -> Option<DesktopCmd> {
     None
 }
 
+/// Left and right on the keyboard: step the highlighted setting back or forward. Rows that
+/// aren't a setting with options ignore it.
+pub fn adjust(core: &mut Core, env: &Env, dir: i32) {
+    let Some(hover) = core.overlay.hover else { return };
+    let Some(act) = items(core, env).get(hover).map(|it| it.act) else { return };
+    let s = &mut core.game.settings;
+    match act {
+        Act::Field(f) => s.look.step(f, dir),
+        Act::Preset => {
+            let n = crate::look::PRESETS.len() as i32;
+            s.set_shell((s.shell as i32 + dir).rem_euclid(n) as u32);
+        }
+        _ => {}
+    }
+}
+
 /// A setting picked by value, as the tray menu offers them (the menu above steps through values).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Choice {
     /// An index into [`SIZES`].
     Size(usize),
+    /// A preset look.
     Shell(u32),
+    /// One option of one part of the look.
+    Look(Field, usize),
     Speed(u32),
     /// `None` is off, otherwise a volume in percent.
     Sound(Option<u32>),
@@ -195,7 +296,8 @@ pub fn choose(core: &mut Core, c: Choice) -> Option<DesktopCmd> {
             s.ui.scale = scale;
             return Some(DesktopCmd::SetScale(scale));
         }
-        Choice::Shell(i) => s.shell = i % crate::layout::SHELLS.len() as u32,
+        Choice::Shell(i) => s.set_shell(i),
+        Choice::Look(f, i) => s.look.set(f, i),
         Choice::Speed(x) => s.speed = x,
         Choice::Sound(v) => core.set_sound(v),
         Choice::OnTop(on) => {
@@ -250,14 +352,31 @@ impl Panel {
     }
 }
 
-/// Which menu row is under a window-pixel position.
-pub fn row_at(px: f32, py: f32, win_w: f32, win_h: f32) -> Option<usize> {
-    let p = panel(win_w, win_h);
+impl Overlay {
+    /// Where this page's panel sits. The menu and help fill most of the window; the SHELL
+    /// pages are only as tall as their rows and keep to the top or bottom, away from the part
+    /// being changed, so you can watch it change.
+    pub fn panel(&self, win_w: f32, win_h: f32) -> Panel {
+        let full = panel(win_w, win_h);
+        let at_bottom = match self.page {
+            Page::Shell | Page::Part(Part::Body | Part::Buttons) => false,
+            Page::Part(Part::Antenna | Part::Screen) => true,
+            Page::Closed | Page::Menu | Page::Help => return full,
+        };
+        let h = ((self.rows() + 1) as f32 * ROW_DOTS + 3.0) * full.fs;
+        let y = if at_bottom { win_h - h - full.y } else { full.y }.round().max(0.0);
+        Panel { y, h, top: y + 1.5 * full.fs + full.row_h, ..full }
+    }
+}
+
+/// Which row of the open page is under a window-pixel position.
+pub fn row_at(o: &Overlay, px: f32, py: f32, win_w: f32, win_h: f32) -> Option<usize> {
+    let p = o.panel(win_w, win_h);
     if !p.contains(px, py) || py < p.top {
         return None;
     }
     let r = ((py - p.top) / p.row_h) as usize;
-    (r < ROWS).then_some(r)
+    (r < o.rows()).then_some(r)
 }
 
 /// A left click at a window-pixel position while the menu is open. A click on a row chooses
@@ -266,20 +385,20 @@ pub fn click(core: &mut Core, env: &Env, px: f32, py: f32, win_w: f32, win_h: f3
     match core.overlay.page {
         Page::Closed => None,
         Page::Help => {
-            if panel(win_w, win_h).contains(px, py) {
+            if core.overlay.panel(win_w, win_h).contains(px, py) {
                 core.overlay.next_help();
             } else {
                 core.overlay.close();
             }
             None
         }
-        Page::Menu => {
-            if let Some(r) = row_at(px, py, win_w, win_h) {
+        Page::Menu | Page::Shell | Page::Part(_) => {
+            if let Some(r) = row_at(&core.overlay, px, py, win_w, win_h) {
                 core.overlay.hover = Some(r);
                 let act = items(core, env)[r].act;
                 activate(core, env, act)
             } else {
-                if !panel(win_w, win_h).contains(px, py) {
+                if !core.overlay.panel(win_w, win_h).contains(px, py) {
                     core.overlay.close();
                 }
                 None
@@ -290,8 +409,8 @@ pub fn click(core: &mut Core, env: &Env, px: f32, py: f32, win_w: f32, win_h: f3
 
 /// Mouse wheel over the menu: positive `steps` move the highlight down.
 pub fn scroll(core: &mut Core, steps: i32) {
-    if core.overlay.page == Page::Menu {
-        let n = ROWS as i32;
+    if core.overlay.has_rows() {
+        let n = core.overlay.rows() as i32;
         let h = core.overlay.hover.unwrap_or(0) as i32;
         core.overlay.hover = Some((h + steps).rem_euclid(n) as usize);
     }
@@ -338,19 +457,43 @@ mod tests {
                 crate::content::Content::builtin(),
                 crate::sim::Game::new(&crate::content::Content::builtin(), crate::rng::Pcg32::new(1)),
             );
-            for shell in 0..crate::screens::town::SHELL_COUNT {
-                core.game.settings.shell = shell;
-                for &(_, s) in &SIZES {
-                    core.game.settings.ui.scale = s;
-                    let items = items(&core, &env);
-                    assert_eq!(items.len(), ROWS);
-                    for it in &items {
-                        let gap = if it.value.is_empty() { 0 } else { 8 };
-                        let w = text_width(it.label) + gap + text_width(&it.value);
-                        assert!(w <= content, "{} {} is too wide", it.label, it.value);
+            let fits = |it: &Item| {
+                let gap = if it.value.is_empty() { 0 } else { 8 };
+                let w = text_width(it.label) + gap + text_width(&it.value);
+                assert!(w <= content, "{} {} is too wide", it.label, it.value);
+            };
+            for &(_, s) in &SIZES {
+                core.game.settings.ui.scale = s;
+                let items = items(&core, &env);
+                assert_eq!(items.len(), ROWS);
+                items.iter().for_each(fits);
+            }
+            // every preset, and CUSTOM, on the menu and the SHELL page
+            for shell in 0..=crate::look::PRESETS.len() as u32 {
+                core.game.settings.set_shell(shell);
+                if shell as usize == crate::look::PRESETS.len() {
+                    core.game.settings.look.step(Field::Ring, 1);
+                }
+                for page in [Page::Menu, Page::Shell] {
+                    core.overlay.page = page;
+                    items(&core, &env).iter().for_each(fits);
+                }
+            }
+            // every option of every part
+            for part in Part::ALL {
+                core.overlay.page = Page::Part(part);
+                assert_eq!(items(&core, &env).len(), core.overlay.rows());
+                for &f in part.fields() {
+                    for i in 0..f.count() {
+                        core.game.settings.look.set(f, i);
+                        items(&core, &env).iter().for_each(fits);
                     }
                 }
             }
+            core.overlay.page = Page::Shell;
+            assert_eq!(items(&core, &env).len(), core.overlay.rows());
+            assert!(core.overlay.rows() <= ROWS);
+            core.overlay.page = Page::Closed;
         }
         for (title, lines) in HELP_PAGES {
             assert!(lines.len() <= ROWS, "{title} has too many lines");
@@ -393,6 +536,79 @@ mod tests {
     }
 
     #[test]
+    fn the_shell_pages() {
+        let content = crate::content::Content::builtin();
+        let game = crate::sim::Game::new(&content, crate::rng::Pcg32::new(1));
+        let mut core = Core::new(content, game);
+        let env = Env { login: false, hide_label: "MINIMIZE" };
+        let (w, h) = crate::render::window_size(0.55);
+        let (w, h) = (w as f32, h as f32);
+        // rows of whichever page is open
+        let row = |core: &Core, i: usize| {
+            let p = core.overlay.panel(w, h);
+            (p.x + p.w / 2.0, p.top + (i as f32 + 0.5) * p.row_h)
+        };
+        let click_row = |core: &mut Core, i: usize| {
+            let (x, y) = row(core, i);
+            click(core, &env, x, y, w, h)
+        };
+        core.overlay.open();
+        // SHELL opens its page; PRESET steps through the presets
+        click_row(&mut core, 1);
+        assert_eq!(core.overlay.page, Page::Shell);
+        click_row(&mut core, 0);
+        assert_eq!(core.game.settings.shell_name(), "LIME");
+        // BUTTONS > SHAPE changes just the buttons
+        click_row(&mut core, 2);
+        assert_eq!(core.overlay.page, Page::Part(Part::Buttons));
+        assert_eq!(items(&core, &env)[1].value, "ROUND");
+        click_row(&mut core, 1);
+        assert_eq!(items(&core, &env)[1].value, "SQUARE");
+        assert_eq!(core.game.settings.look.body, crate::look::PRESETS[1].look.body);
+        assert_eq!(core.game.settings.shell_name(), "CUSTOM");
+        // left and right step either way
+        core.overlay.hover = Some(1);
+        adjust(&mut core, &env, -1);
+        assert_eq!(core.game.settings.shell_name(), "LIME");
+        // a short page's panel is only as tall as its rows, and stays clear of what it changes
+        let p = core.overlay.panel(w, h);
+        assert!(p.h < panel(w, h).h / 2.0, "{p:?}");
+        let (x, y) = row(&core, 4);
+        assert_eq!(row_at(&core.overlay, x, y, w, h), None);
+        use crate::layout::{BUTTONS, STAR, VIEW};
+        let scale = w / VIEW.2;
+        let px = |x: f32, y: f32| ((x - VIEW.0) * scale, (y - VIEW.1) * scale);
+        for &(_, bx, by) in &BUTTONS {
+            let (x, y) = px(bx, by);
+            assert!(!p.contains(x, y), "the panel hides the buttons");
+        }
+        core.overlay.go(Page::Part(Part::Antenna), 0);
+        let (x, y) = px(STAR.0, STAR.1);
+        assert!(!core.overlay.panel(w, h).contains(x, y), "the panel hides the antenna");
+        core.overlay.go(Page::Part(Part::Buttons), 1);
+        // BACK, then right-click, then right-click again: up a page each time
+        let n = core.overlay.rows();
+        click_row(&mut core, n - 1);
+        assert_eq!((core.overlay.page, core.overlay.hover), (Page::Shell, Some(2)));
+        core.right_click();
+        assert_eq!((core.overlay.page, core.overlay.hover), (Page::Menu, Some(1)));
+        core.right_click();
+        assert!(!core.overlay.is_open());
+        // RANDOM always changes something
+        core.overlay.open();
+        core.overlay.go(Page::Shell, 0);
+        for _ in 0..20 {
+            let before = core.game.settings.look;
+            activate(&mut core, &env, Act::Random);
+            assert_ne!(core.game.settings.look, before);
+        }
+        // the scroll wheel wraps within the page
+        core.overlay.go(Page::Part(Part::Antenna), 0);
+        scroll(&mut core, -1);
+        assert_eq!(core.overlay.hover, Some(3));
+    }
+
+    #[test]
     fn sound_steps_through_the_volumes() {
         let content = crate::content::Content::builtin();
         let game = crate::sim::Game::new(&content, crate::rng::Pcg32::new(1));
@@ -422,12 +638,16 @@ mod tests {
         assert_eq!(choose(&mut core, Choice::Size(3)), Some(DesktopCmd::SetScale(1.0)));
         assert_eq!(core.game.settings.ui.scale, 1.0);
         choose(&mut core, Choice::Shell(5));
+        choose(&mut core, Choice::Look(Field::Lcd, 3));
         choose(&mut core, Choice::Speed(60));
         choose(&mut core, Choice::Sound(None));
         assert_eq!(choose(&mut core, Choice::OnTop(false)), Some(DesktopCmd::SetOnTop(false)));
         choose(&mut core, Choice::Notify(false));
         let s = &core.game.settings;
         assert_eq!((s.shell, s.speed, s.muted, s.ui.on_top, s.ui.notify), (5, 60, true, false, false));
+        assert_eq!(s.look.lcd, crate::look::Lcd::Amber);
+        assert_eq!(s.look.pattern, crate::look::Pattern::Flame);
+        assert_eq!(s.shell_name(), "CUSTOM");
         assert_eq!(choose(&mut core, Choice::Login(true)), Some(DesktopCmd::SetLogin(true)));
     }
 }

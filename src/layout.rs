@@ -1,4 +1,7 @@
-//! Device geometry and shell designs, in design units on a 440x640 canvas.
+//! Device geometry, in design units on a 440x640 canvas. How it is coloured and decorated is
+//! in [`crate::look`].
+
+use crate::look::{Antenna, Look};
 
 pub const CANVAS_W: f32 = 440.0;
 pub const CANVAS_H: f32 = 640.0;
@@ -21,44 +24,17 @@ pub const LCD_BG: [u8; 3] = [178, 190, 166];
 pub const LCD_OFF: [u8; 3] = [168, 180, 157];
 pub const LCD_ON: [u8; 3] = [32, 38, 36];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Pattern {
-    Plain,
-    Zebra,
-    Flame,
-    Sprinkles,
-    Camo,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Shell {
-    pub name: &'static str,
-    pub base: [u8; 3],
-    pub pattern: Pattern,
-    pub button: [u8; 3],
-}
-
-pub const SHELLS: [Shell; 8] = [
-    Shell { name: "BERRY", base: [236, 72, 153], pattern: Pattern::Plain, button: [236, 72, 153] },
-    Shell { name: "LIME", base: [132, 204, 22], pattern: Pattern::Plain, button: [132, 204, 22] },
-    Shell { name: "OCEAN", base: [56, 152, 236], pattern: Pattern::Plain, button: [56, 152, 236] },
-    Shell { name: "GRAPE", base: [147, 92, 226], pattern: Pattern::Plain, button: [147, 92, 226] },
-    Shell { name: "ZEBRA", base: [238, 238, 232], pattern: Pattern::Zebra, button: [236, 72, 153] },
-    Shell { name: "FLAME", base: [249, 115, 22], pattern: Pattern::Flame, button: [249, 115, 22] },
-    Shell { name: "DONUT", base: [246, 170, 200], pattern: Pattern::Sprinkles, button: [246, 170, 200] },
-    Shell { name: "CAMO", base: [112, 132, 84], pattern: Pattern::Camo, button: [112, 132, 84] },
-];
-
-pub fn shell(i: u32) -> &'static Shell {
-    &SHELLS[i as usize % SHELLS.len()]
-}
-
 pub fn lighten(c: [u8; 3], f: f32) -> [u8; 3] {
     c.map(|v| (v as f32 + (255.0 - v as f32) * f) as u8)
 }
 
 pub fn darken(c: [u8; 3], f: f32) -> [u8; 3] {
     c.map(|v| (v as f32 * (1.0 - f)) as u8)
+}
+
+/// Perceived brightness, 0 to 1.
+pub fn luma(c: [u8; 3]) -> f32 {
+    (0.299 * c[0] as f32 + 0.587 * c[1] as f32 + 0.114 * c[2] as f32) / 255.0
 }
 
 /// The egg outline (slightly narrower at the top).
@@ -80,15 +56,88 @@ pub fn inner_egg() -> Vec<(f32, f32)> {
     egg_points(CX, CY + 2.0, SHELL_A - 9.0, SHELL_B - 9.0, 120)
 }
 
-pub fn star_points() -> Vec<(f32, f32)> {
+/// A five-pointed star around (cx, cy), turned by `rot` radians.
+pub fn star_points_at(cx: f32, cy: f32, outer: f32, inner: f32, rot: f32) -> Vec<(f32, f32)> {
     (0..10)
         .map(|i| {
-            let r = if i % 2 == 0 { 34.0 } else { 15.0 };
-            let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 5.0 - 0.35;
-            (STAR.0 + r * a.cos(), STAR.1 + r * a.sin())
+            let r = if i % 2 == 0 { outer } else { inner };
+            let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 5.0 + rot;
+            (cx + r * a.cos(), cy + r * a.sin())
         })
         .collect()
 }
+
+pub fn star_points() -> Vec<(f32, f32)> {
+    star_points_at(STAR.0, STAR.1, 34.0, 15.0, -0.35)
+}
+
+/// A heart about `2 * r` wide around (cx, cy), turned by `rot` radians.
+pub fn heart_points(cx: f32, cy: f32, r: f32, rot: f32) -> Vec<(f32, f32)> {
+    let k = r / 16.0;
+    let (s, c) = rot.sin_cos();
+    (0..48)
+        .map(|i| {
+            let t = std::f32::consts::TAU * i as f32 / 48.0;
+            let x = 16.0 * t.sin().powi(3);
+            // the classic heart curve, flipped for y-down and centred on its middle
+            let y = -(13.0 * t.cos() - 5.0 * (2.0 * t).cos() - 2.0 * (3.0 * t).cos() - (4.0 * t).cos()) - 2.5;
+            let (x, y) = (x * k, y * k);
+            (cx + x * c - y * s, cy + x * s + y * c)
+        })
+        .collect()
+}
+
+/// Points on a circle.
+pub fn circle_points(cx: f32, cy: f32, r: f32, n: usize) -> Vec<(f32, f32)> {
+    (0..n)
+        .map(|i| {
+            let t = std::f32::consts::TAU * i as f32 / n as f32;
+            (cx + r * t.cos(), cy + r * t.sin())
+        })
+        .collect()
+}
+
+/// The antenna's outline; empty for none. Every shape fits within the original star's reach,
+/// so the window shape and hit-testing only have to follow the outline.
+pub fn antenna_points(a: Antenna) -> Vec<(f32, f32)> {
+    let (cx, cy) = STAR;
+    let turn = |pts: Vec<(f32, f32)>, rot: f32| -> Vec<(f32, f32)> {
+        let (s, c) = rot.sin_cos();
+        pts.into_iter().map(|(x, y)| (cx + x * c - y * s, cy + x * s + y * c)).collect()
+    };
+    match a {
+        Antenna::Star => star_points(),
+        Antenna::Heart => heart_points(cx, cy, 30.0, -0.3),
+        Antenna::Ball => circle_points(cx, cy, 25.0, 40),
+        Antenna::Moon => {
+            // a disc of radius 31 with one of radius 25 taken out of it, 16 units off-centre
+            let (big, small, d) = (31.0f32, 25.0f32, 16.0f32);
+            let ix = (d * d + big * big - small * small) / (2.0 * d);
+            let iy = (big * big - ix * ix).sqrt();
+            let a0 = iy.atan2(ix);
+            let b0 = iy.atan2(ix - d);
+            let n = 24;
+            let mut pts = Vec::new();
+            for i in 0..=n {
+                let t = a0 + (std::f32::consts::TAU - 2.0 * a0) * i as f32 / n as f32;
+                pts.push((big * t.cos() - 4.0, big * t.sin()));
+            }
+            for i in 0..=n {
+                let t = (std::f32::consts::TAU - b0) - (std::f32::consts::TAU - 2.0 * b0) * i as f32 / n as f32;
+                pts.push((d + small * t.cos() - 4.0, small * t.sin()));
+            }
+            turn(pts, -0.8)
+        }
+        Antenna::Bolt => {
+            let pts = [(0.35, -1.0), (-0.6, 0.15), (-0.05, 0.15), (-0.35, 1.0), (0.65, -0.2), (0.1, -0.2)];
+            turn(pts.iter().map(|&(x, y)| (x * 34.0, y * 34.0)).collect(), 0.35)
+        }
+        Antenna::None => Vec::new(),
+    }
+}
+
+/// The key ring at the top of the shell: centre and outer reach.
+pub const RING: (f32, f32, f32) = (CX, CY - SHELL_B - 6.0, 22.0);
 
 /// (x, y, w, h) of the ten icons: top row 0-4, bottom row 5-9.
 pub fn icon_rects() -> [(f32, f32, f32, f32); 10] {
@@ -122,12 +171,18 @@ pub fn button_at(x: f32, y: f32) -> Option<crate::Button> {
     BUTTONS.iter().find(|&&(_, bx, by)| (x - bx).powi(2) + (y - by).powi(2) <= (BTN_R + 6.0).powi(2)).map(|b| b.0)
 }
 
-/// Is a design-space point on the device (shell, star antenna or key ring)?
-pub fn on_device(x: f32, y: f32) -> bool {
+/// Is a design-space point on the device (shell, antenna or key ring)?
+pub fn on_device(x: f32, y: f32, look: &Look) -> bool {
+    let antenna = antenna_points(look.antenna);
     point_in_poly(x, y, &egg_points(CX, CY, SHELL_A + 3.0, SHELL_B + 3.0, 120))
-        || point_in_poly(x, y, &star_points())
-        || ((x - CX).powi(2) + (y - (CY - SHELL_B - 6.0)).powi(2)).sqrt() <= 22.0
-        || (x > STAR.0 - 4.0 && x < STAR.0 + 56.0 && y > STAR.1 - 4.0 && y < STAR.1 + 56.0 && (x - y).abs() < 14.0)
+        || (!antenna.is_empty() && point_in_poly(x, y, &antenna))
+        || (look.ring && ((x - RING.0).powi(2) + (y - RING.1).powi(2)).sqrt() <= RING.2)
+        || (!antenna.is_empty()
+            && x > STAR.0 - 4.0
+            && x < STAR.0 + 56.0
+            && y > STAR.1 - 4.0
+            && y < STAR.1 + 56.0
+            && (x - y).abs() < 14.0)
 }
 
 pub fn point_in_poly(x: f32, y: f32, pts: &[(f32, f32)]) -> bool {
