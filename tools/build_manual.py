@@ -585,6 +585,9 @@ custom = Table([[img("menu_shell", 1.9 * inch),
                         ["SCREEN", "FACE (the panel around the screen), EDGE (its rim), FRAME (the border right "
                                    "around the screen), CORNERS (Round, Soft or Square) and LCD (Classic, Gray, "
                                    "Blue, Amber or Pink)."],
+                        ["ICONS", "ICONS (the menu icons), SELECT (the selected icon), ALERT (the attention "
+                                  "icon while your pet calls) and NAME (the BYTEPET text). AUTO keeps the "
+                                  "usual colours."],
                         ["RANDOM", "A surprise: every part at once."]],
                        [0.9 * inch, CW - 2.2 * inch - 0.9 * inch])]],
                colWidths=[2.2 * inch, CW - 2.2 * inch])
@@ -592,7 +595,7 @@ custom.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
 story += [KeepTogether([
     P("Make it your own", "h2"),
     P("Choose <b>SHELL</b> in the desktop menu (right-click the home screen) for a page of its own. "
-      "<b>PRESET</b> steps through the designs above; the four pages below it change one part of the device "
+      "<b>PRESET</b> steps through the designs above; the five pages below it change one part of the device "
       "each, and the rest stays as it is. Click a setting to step to its next option, or use the "
       "<b>left</b> and <b>right</b> arrow keys to go either way. Once you've changed anything, the shell "
       "reads <b>CUSTOM</b>. The tray icon's <b>Customize</b> menu has the same settings. Right-click or "

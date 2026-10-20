@@ -359,7 +359,9 @@ impl Overlay {
     pub fn panel(&self, win_w: f32, win_h: f32) -> Panel {
         let full = panel(win_w, win_h);
         let at_bottom = match self.page {
-            Page::Shell | Page::Part(Part::Body | Part::Buttons) => false,
+            // the icons' panel covers the top row and leaves the bottom row, with the alert icon
+            // and the name, in sight
+            Page::Shell | Page::Part(Part::Body | Part::Buttons | Part::Icons) => false,
             Page::Part(Part::Antenna | Part::Screen) => true,
             Page::Closed | Page::Menu | Page::Help => return full,
         };
@@ -585,6 +587,12 @@ mod tests {
         core.overlay.go(Page::Part(Part::Antenna), 0);
         let (x, y) = px(STAR.0, STAR.1);
         assert!(!core.overlay.panel(w, h).contains(x, y), "the panel hides the antenna");
+        core.overlay.go(Page::Part(Part::Icons), 0);
+        let p = core.overlay.panel(w, h);
+        for &(x, y, iw, ih) in &crate::layout::icon_rects()[5..] {
+            let (x, y) = px(x + iw / 2.0, y + ih / 2.0);
+            assert!(!p.contains(x, y), "the panel hides the bottom icons");
+        }
         core.overlay.go(Page::Part(Part::Buttons), 1);
         // BACK, then right-click, then right-click again: up a page each time
         let n = core.overlay.rows();

@@ -49,12 +49,13 @@ empty space around the egg pass through to whatever is behind it.
   volume, always on top, notifications, launch at login, help, hide and quit.
 - **Make it yours:** the menu's SHELL page has 12 preset designs, and pages for the body
   (colour, pattern, pattern colour, shine), buttons (colour, shape, letters), antenna (shape,
-  colour, key ring) and screen (faceplate, rim, frame, corners, LCD colour). Each part changes on
-  its own, and RANDOM changes every part at once. Click a setting for its next option, or use the
-  left and right arrow keys; right-click goes back a page. The tray menu's *Customize* submenu
-  has the same settings.
+  colour, key ring), screen (faceplate, rim, frame, corners, LCD colour) and icons (icon colour,
+  the selected icon, the alert icon and the BYTEPET text). Each part changes on its own, and
+  RANDOM changes every part at once. Click a setting for its next option, or use the left and
+  right arrow keys; right-click goes back a page. The tray menu's *Customize* submenu has the same
+  settings.
 - **Tray or menu-bar icon:** click it to show or hide the pet, or right-click it for the same
-  settings. On Windows and macOS Bytepet has no taskbar or Dock button, so the tray icon is
+  settings. On Windows the menu stays open while you pick settings; click outside it to close it. On Windows and macOS Bytepet has no taskbar or Dock button, so the tray icon is
   how you bring it back after hiding it.
 - **Notifications** tell you when your pet calls, gets sick, hatches, grows up, gets mail or
   leaves, at most once every 2 minutes per kind.
@@ -98,7 +99,8 @@ shell designs. When the game asks for a name or an IP address, type it on your k
 
 Time runs in real time and follows your computer's clock, so the pet sleeps at night. Time
 also keeps running while Bytepet is closed, up to 14 days. To pause instead, set
-*Town → Setup → WHEN OFF* to PAUSE. Speeds of 10×, 60× and 600× are for trying things out.
+*Town → Setup → WHEN OFF* to PAUSE. Speeds of 10×, 60× and 600× are for trying things out; while
+one is on, a badge above the screen shows it.
 
 | Stage | Length | Notes |
 |---|---|---|

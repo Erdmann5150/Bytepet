@@ -1,7 +1,7 @@
 //! Device geometry, in design units on a 440x640 canvas. How it is coloured and decorated is
 //! in [`crate::look`].
 
-use crate::look::{Antenna, Look};
+use crate::look::{Antenna, Corners, Look};
 
 pub const CANVAS_W: f32 = 440.0;
 pub const CANVAS_H: f32 = 640.0;
@@ -9,6 +9,7 @@ pub const CX: f32 = 220.0;
 pub const CY: f32 = 318.0;
 pub const SHELL_A: f32 = 196.0;
 pub const SHELL_B: f32 = 262.0;
+/// The faceplate with round corners; see [`face_rect`].
 pub const FACE: (f32, f32, f32, f32) = (58.0, 168.0, 324.0, 252.0);
 pub const LCD_POS: (f32, f32) = (92.0, 228.0);
 pub const CELL: f32 = 8.0;
@@ -136,6 +137,13 @@ pub fn antenna_points(a: Antenna) -> Vec<(f32, f32)> {
     }
 }
 
+/// The faceplate (x, y, w, h) for a corner style, brought in at the sides so its corners stay
+/// on the shell.
+pub fn face_rect(c: Corners) -> (f32, f32, f32, f32) {
+    let i = c.inset();
+    (FACE.0 + i, FACE.1, FACE.2 - 2.0 * i, FACE.3)
+}
+
 /// The key ring at the top of the shell: centre and outer reach.
 pub const RING: (f32, f32, f32) = (CX, CY - SHELL_B - 6.0, 22.0);
 
@@ -197,4 +205,32 @@ pub fn point_in_poly(x: f32, y: f32, pts: &[(f32, f32)]) -> bool {
         j = i;
     }
     inside
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_faceplate_stays_on_the_shell_with_every_corner_style() {
+        // the round faceplate's rim just reaches the shell's edge; the others may go no further
+        let shell = egg_points(CX, CY, SHELL_A + 1.5, SHELL_B + 1.5, 240);
+        for c in Corners::ALL {
+            // the faceplate's rim, as drawn: 5 units round the faceplate, corners 4 rounder
+            let (x, y, w, h) = face_rect(c);
+            let (x, y, w, h, r) = (x - 5.0, y - 5.0, w + 10.0, h + 10.0, c.radius() + 4.0);
+            for (cx, cy, a0) in [
+                (x + r, y + r, 180.0f32),
+                (x + w - r, y + r, 270.0),
+                (x + w - r, y + h - r, 0.0),
+                (x + r, y + h - r, 90.0),
+            ] {
+                for k in 0..=18 {
+                    let a = (a0 + k as f32 * 5.0).to_radians();
+                    let (px, py) = (cx + r * a.cos(), cy + r * a.sin());
+                    assert!(point_in_poly(px, py, &shell), "{c:?}: ({px:.1}, {py:.1}) is off the shell");
+                }
+            }
+        }
+    }
 }
