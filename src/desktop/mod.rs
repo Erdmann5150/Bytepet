@@ -413,7 +413,7 @@ impl App {
             if self.core.overlay.is_open() {
                 overlay::scroll(&mut self.core, if up { -1 } else { 1 });
             } else {
-                self.core.tap(Button::A);
+                self.core.scroll(up);
             }
         }
     }

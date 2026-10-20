@@ -15,7 +15,7 @@ use crate::lcd::Lcd;
 use crate::net::{clip, local_ip, Found, Link, NetEvent, PROTO};
 use crate::screens::care::Wedding;
 use crate::screens::town::wed;
-use crate::screens::{boxed, msg_owned, Confirm, Ctx, DrawCx, Key, Message, Pick, Res, Screen, Tr};
+use crate::screens::{back, boxed, msg_owned, Confirm, Ctx, DrawCx, Key, Message, Pick, Res, Screen, Tr};
 use crate::{Button, Tune};
 
 const ACTIONS: [&str; 4] = ["VISIT", "GAME", "GIFT", "MARRY"];
@@ -395,6 +395,18 @@ impl Screen for LinkScreen {
 
     fn wants_text(&self) -> bool {
         self.state == State::IpEntry
+    }
+
+    fn prev(&mut self, cx: &mut Ctx) -> Option<Tr> {
+        let n = match self.state {
+            State::Menu => 3,
+            State::PickHost if !self.hosts.is_empty() => self.hosts.len(),
+            State::Action => ACTIONS.len(),
+            _ => return None,
+        };
+        cx.play(Tune::Click);
+        self.k = back(self.k, n);
+        Some(Tr::None)
     }
 
     fn press(&mut self, cx: &mut Ctx, b: Button) -> Tr {

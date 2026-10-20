@@ -100,6 +100,11 @@ pub trait Screen {
     fn release(&mut self, _cx: &mut Ctx, _b: Button) -> Tr {
         Tr::None
     }
+    /// Move the menu cursor back one (the scroll wheel turned up). `None` where there is no
+    /// cursor to move back, and the wheel presses A instead.
+    fn prev(&mut self, _cx: &mut Ctx) -> Option<Tr> {
+        None
+    }
     fn update(&mut self, _cx: &mut Ctx, _dt: f64) -> Tr {
         Tr::None
     }
@@ -242,6 +247,15 @@ impl Screen for Confirm {
 }
 
 // ====================================================================== list helpers
+/// The index before `i` in a list of `n`, wrapping around to the end.
+pub fn back(i: usize, n: usize) -> usize {
+    if n == 0 {
+        0
+    } else {
+        (i % n + n - 1) % n
+    }
+}
+
 /// A two-row list with a cursor (A = next). Used by menus.
 #[derive(Default)]
 pub struct ListView {
@@ -253,6 +267,12 @@ impl ListView {
     pub fn next(&mut self, n: usize) {
         if n > 0 {
             self.i = (self.i + 1) % n;
+            self.t = 0.0;
+        }
+    }
+    pub fn prev(&mut self, n: usize) {
+        if n > 0 {
+            self.i = back(self.i, n);
             self.t = 0.0;
         }
     }
@@ -332,6 +352,15 @@ impl Screen for Pick {
             _ => Tr::None,
         }
     }
+    fn prev(&mut self, cx: &mut Ctx) -> Option<Tr> {
+        if self.rows.is_empty() {
+            return None;
+        }
+        cx.play(Tune::Click);
+        self.i = back(self.i, self.rows.len());
+        self.t = 0.0;
+        Some(Tr::None)
+    }
     fn draw(&self, _cx: &DrawCx, lcd: &mut Lcd) {
         match self.rows.get(self.i) {
             Some((a, b)) => draw_pick(lcd, a, b, self.t, self.i, self.rows.len()),
@@ -383,6 +412,11 @@ impl Screen for NameEntry {
     fn update(&mut self, _cx: &mut Ctx, dt: f64) -> Tr {
         self.t += dt;
         Tr::None
+    }
+    fn prev(&mut self, cx: &mut Ctx) -> Option<Tr> {
+        cx.play(Tune::Click);
+        self.k = back(self.k, NAME_CHOICES.len());
+        Some(Tr::None)
     }
     fn press(&mut self, cx: &mut Ctx, b: Button) -> Tr {
         cx.play(Tune::Click);
