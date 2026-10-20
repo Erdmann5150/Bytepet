@@ -1,0 +1,371 @@
+//! The app core: owns the game, the screen stack and the LCD. Front-ends call `frame()` once per
+//! frame and forward input; they read `lcd`/`shade`, `icon_states()` and drain `take_sfx()` /
+//! `take_notices()`.
+
+use std::collections::VecDeque;
+use std::path::PathBuf;
+
+use crate::content::Content;
+use crate::lcd::{Lcd, H, W};
+use crate::overlay::Overlay;
+use crate::rng::Pcg32;
+use crate::save;
+use crate::screens::{Ctx, DrawCx, Key, MainScreen, Message, Res, Screen, Tr, UiState};
+use crate::sim::{Event, Game};
+use crate::{Button, Tune};
+
+pub const SAVE_EVERY: f64 = 20.0;
+
+pub struct Core {
+    pub content: Content,
+    pub game: Game,
+    pub stack: Vec<Box<dyn Screen>>,
+    pub lcd: Lcd,
+    /// LCD dots fade toward their target, like a real LCD's slow response.
+    pub shade: [f32; (W * H) as usize],
+    pub ui: UiState,
+    pub overlay: Overlay,
+    pub held: [bool; 3],
+    pending: VecDeque<Event>,
+    sfx: Vec<Tune>,
+    notices: Vec<Event>,
+    save_path: Option<PathBuf>,
+    save_timer: f64,
+    /// Wall clock of the previous frame (None until the first frame).
+    last_wall: Option<f64>,
+    /// Local hour for a unix timestamp (replaceable in tests).
+    pub hour_at: fn(f64) -> f64,
+    /// Message shown at startup (load problems, time away).
+    pub startup_notes: Vec<String>,
+}
+
+macro_rules! ctx {
+    ($s:ident) => {
+        Ctx {
+            game: &mut $s.game,
+            content: &$s.content,
+            ui: &mut $s.ui,
+            sfx: &mut $s.sfx,
+            held: $s.held,
+            pending: &mut $s.pending,
+        }
+    };
+}
+
+pub fn now_unix() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
+}
+
+/// Local hour of day (0..24) for a unix timestamp.
+pub fn local_hour(ts: f64) -> f64 {
+    use chrono::{Local, TimeZone, Timelike};
+    match Local.timestamp_opt(ts as i64, 0) {
+        chrono::LocalResult::Single(t) | chrono::LocalResult::Ambiguous(t, _) => {
+            t.hour() as f64 + t.minute() as f64 / 60.0 + t.second() as f64 / 3600.0
+        }
+        chrono::LocalResult::None => 12.0,
+    }
+}
+
+impl Core {
+    /// A core around an existing game (tests, or a freshly loaded save).
+    pub fn new(content: Content, game: Game) -> Core {
+        Core {
+            content,
+            game,
+            stack: vec![Box::new(MainScreen::new())],
+            lcd: Lcd::default(),
+            shade: [0.0; (W * H) as usize],
+            ui: UiState { sel: -1, ..UiState::default() },
+            overlay: Overlay::default(),
+            held: [false; 3],
+            pending: VecDeque::new(),
+            sfx: Vec::new(),
+            notices: Vec::new(),
+            save_path: None,
+            save_timer: 0.0,
+            last_wall: None,
+            hour_at: local_hour,
+            startup_notes: Vec::new(),
+        }
+    }
+
+    /// Load (or create) the save at `path`, catching up on time spent closed.
+    pub fn open(content: Content, path: PathBuf, fresh: bool) -> Core {
+        let mut notes = Vec::new();
+        let now = now_unix();
+        let mut away = 0.0;
+        let mut writable = true;
+        let game = if fresh {
+            Game::new(&content, Pcg32::from_time())
+        } else {
+            match save::load(&path) {
+                Ok(s) => {
+                    let mut g = s.game;
+                    g.repair(&content);
+                    let gap = now - s.saved_at;
+                    if g.settings.run_away && gap > 5.0 {
+                        away = g.catch_up(&content, gap, s.saved_at, &local_hour);
+                    }
+                    g
+                }
+                Err(save::LoadError::Missing) => Game::new(&content, Pcg32::from_time()),
+                Err(e @ save::LoadError::TooNew(_)) => {
+                    // never overwrite a save made by a newer version
+                    writable = false;
+                    notes.push(format!("{e}. Running without saving."));
+                    Game::new(&content, Pcg32::from_time())
+                }
+                Err(e) => {
+                    notes.push(e.to_string());
+                    Game::new(&content, Pcg32::from_time())
+                }
+            }
+        };
+        let mut core = Core::new(content, game);
+        core.save_path = if writable { Some(path) } else { None };
+        core.startup_notes = notes;
+        if away > 600.0 {
+            let (h, m) = ((away / 3600.0) as u32, ((away % 3600.0) / 60.0) as u32);
+            core.stack.push(Box::new(Message::new(vec![
+                ("WELCOME".into(), "BACK!".into()),
+                ("AWAY".into(), format!("{h}H {m}M")),
+            ])));
+        }
+        // events from the catch-up: keep only the latest of each kind
+        core.collect_events(true);
+        core
+    }
+
+    pub fn save_path(&self) -> Option<&PathBuf> {
+        self.save_path.as_ref()
+    }
+
+    pub fn save(&mut self) {
+        if let Some(p) = &self.save_path {
+            if let Err(e) = save::save(p, &self.game, now_unix()) {
+                eprintln!("bytepet: save failed: {e}");
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ screen stack
+    pub fn top_name(&self) -> &'static str {
+        self.stack.last().map(|s| s.name()).unwrap_or("")
+    }
+
+    pub fn wants_text(&self) -> bool {
+        self.stack.last().map(|s| s.wants_text()).unwrap_or(false)
+    }
+
+    fn with_top(&mut self, f: impl FnOnce(&mut dyn Screen, &mut Ctx) -> Tr) {
+        let Some(mut s) = self.stack.pop() else { return };
+        let tr = {
+            let mut cx = ctx!(self);
+            f(s.as_mut(), &mut cx)
+        };
+        self.stack.push(s);
+        self.apply(tr);
+    }
+
+    fn apply(&mut self, tr: Tr) {
+        match tr {
+            Tr::None => {}
+            Tr::Push(s) => self.stack.push(s),
+            Tr::PushAll(v) => self.stack.extend(v),
+            Tr::Pop => {
+                if self.stack.len() > 1 {
+                    self.stack.pop();
+                }
+            }
+            Tr::PopWith(r) => {
+                if self.stack.len() > 1 {
+                    self.stack.pop();
+                }
+                self.with_top(|s, cx| s.result(cx, r));
+            }
+            Tr::Replace(s) => {
+                if self.stack.len() > 1 {
+                    self.stack.pop();
+                }
+                self.stack.push(s);
+            }
+            Tr::ToMain => self.stack.truncate(1),
+            Tr::ToMainThen(v) => {
+                self.stack.truncate(1);
+                self.stack.extend(v);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ input
+    pub fn press(&mut self, b: Button) {
+        // A and C together toggle the sound, like the real thing
+        if (b == Button::A && self.held[2]) || (b == Button::C && self.held[0]) {
+            self.held[b.index()] = true;
+            self.toggle_mute();
+            return;
+        }
+        self.held[b.index()] = true;
+        self.with_top(|s, cx| s.press(cx, b));
+    }
+
+    pub fn release(&mut self, b: Button) {
+        if self.held[b.index()] {
+            self.held[b.index()] = false;
+            self.with_top(|s, cx| s.release(cx, b));
+        }
+    }
+
+    pub fn text(&mut self, s: &str) {
+        self.with_top(|sc, cx| sc.text(cx, s));
+    }
+
+    pub fn key(&mut self, k: Key) {
+        self.with_top(|sc, cx| sc.key(cx, k));
+    }
+
+    pub fn click_icon(&mut self, i: usize) {
+        if i >= 9 || self.stack.len() != 1 {
+            return;
+        }
+        self.ui.sel = i as i32;
+        self.with_top(|s, cx| s.activate_icon(cx, i));
+    }
+
+    pub fn toggle_mute(&mut self) {
+        let s = &mut self.game.settings;
+        s.muted = !s.muted;
+        if !s.muted {
+            self.sfx.push(Tune::Ok);
+        }
+    }
+
+    pub fn cycle_speed(&mut self) {
+        use crate::screens::town::SPEEDS;
+        let s = &mut self.game.settings;
+        let k = SPEEDS.iter().position(|&x| x == s.speed).unwrap_or(0);
+        s.speed = SPEEDS[(k + 1) % SPEEDS.len()];
+    }
+
+    pub fn next_shell(&mut self) {
+        self.game.settings.shell = (self.game.settings.shell + 1) % crate::layout::SHELLS.len() as u32;
+    }
+
+    // ------------------------------------------------------------------ per frame
+    /// Advance by `dt` real seconds.
+    pub fn frame(&mut self, dt: f64) {
+        let now = now_unix();
+        self.frame_at(dt, now);
+    }
+
+    /// `frame` with an explicit wall clock (tests).
+    pub fn frame_at(&mut self, dt: f64, now: f64) {
+        let dt = dt.clamp(0.0, 0.25);
+        let gap = self.last_wall.map(|w| now - w).unwrap_or(0.0);
+        self.last_wall = Some(now);
+        if gap > 5.0 {
+            // the computer slept, or the app was frozen
+            if self.game.settings.run_away {
+                let hour_at = self.hour_at;
+                self.game.catch_up(&self.content, gap, now - gap, &hour_at);
+                self.collect_events(true);
+            }
+        } else {
+            let hour = (self.hour_at)(now);
+            let mut sim_dt = dt * self.game.settings.speed as f64;
+            while sim_dt > 0.0 {
+                let step = sim_dt.min(30.0);
+                self.game.step(&self.content, step, hour);
+                sim_dt -= step;
+            }
+            self.collect_events(false);
+        }
+        self.with_top(|s, cx| s.update(cx, dt));
+        self.render_lcd();
+        let k = 1.0 - (-dt as f32 * 18.0).exp();
+        for (sh, &v) in self.shade.iter_mut().zip(self.lcd.buf.iter()) {
+            *sh += (v as f32 - *sh) * k;
+        }
+        self.save_timer += dt;
+        if self.save_timer >= SAVE_EVERY {
+            self.save_timer = 0.0;
+            self.save();
+        }
+    }
+
+    fn collect_events(&mut self, summarize: bool) {
+        let mut evs: Vec<Event> = std::mem::take(&mut self.game.events);
+        if summarize {
+            // after a long gap only the latest of each kind matters
+            let mut seen = Vec::new();
+            let mut keep = Vec::new();
+            for e in evs.into_iter().rev() {
+                let kind = std::mem::discriminant(&e);
+                if !seen.contains(&kind) && !matches!(e, Event::Poop | Event::Mistake | Event::Sleep | Event::Wake) {
+                    seen.push(kind);
+                    keep.push(e);
+                }
+            }
+            keep.reverse();
+            evs = keep;
+        }
+        for e in evs {
+            self.notices.push(e.clone());
+            if !matches!(e, Event::Poop | Event::Mistake | Event::Sleep | Event::Wake | Event::NewEgg) {
+                self.pending.push_back(e);
+            }
+        }
+        while self.pending.len() > 12 {
+            self.pending.pop_front();
+        }
+    }
+
+    pub fn render_lcd(&mut self) {
+        self.lcd.clear(0);
+        if let Some(top) = self.stack.last() {
+            let dcx = DrawCx { game: &self.game, content: &self.content, ui: &self.ui };
+            top.draw(&dcx, &mut self.lcd);
+        }
+    }
+
+    pub fn take_sfx(&mut self) -> Vec<Tune> {
+        std::mem::take(&mut self.sfx)
+    }
+
+    pub fn take_notices(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.notices)
+    }
+
+    /// Which of the ten bezel icons are dark right now.
+    pub fn icon_states(&self, wall: f64) -> [bool; 10] {
+        let p = &self.game.pet;
+        let blink = (wall * 2.0) as i64 % 2 == 1;
+        let mut out = [false; 10];
+        for (i, o) in out.iter_mut().enumerate() {
+            *o = i as i32 == self.ui.sel;
+        }
+        out[9] = p.call.is_some();
+        if !p.mail.is_empty() && blink {
+            out[8] = true;
+        }
+        out
+    }
+
+    pub fn status_tags(&self) -> String {
+        let s = &self.game.settings;
+        let mut t = Vec::new();
+        if s.speed != 1 {
+            t.push(format!("{}X", s.speed));
+        }
+        if s.muted {
+            t.push("MUTE".into());
+        }
+        t.join(" ")
+    }
+
+    /// Deliver a result to the top screen directly (used by the link screen's network events).
+    pub fn deliver(&mut self, r: Res) {
+        self.with_top(|s, cx| s.result(cx, r));
+    }
+}

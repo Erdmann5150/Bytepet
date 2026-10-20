@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Bytepet
+Comment=A virtual pet that lives on your desktop
+Exec=bytepet
+Icon=bytepet
+Terminal=false
+Categories=Game;Simulation;
+StartupNotify=false

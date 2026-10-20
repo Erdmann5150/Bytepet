@@ -1,0 +1,138 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The game core (simulation, screens, rendering, saves, networking) on every OS.
+  # This needs no system libraries, so it runs even where the desktop shell can't.
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --no-default-features
+      - name: long fuzz (debug build, so the LCD overflow assertions are active)
+        if: matrix.os == 'ubuntu-22.04'
+        run: cargo test --no-default-features --test robustness -- --ignored
+
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+
+  # The full desktop app, packaged per platform.
+  package:
+    name: package (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, name: linux-x86_64 }
+          - { os: windows-latest, name: windows-x86_64 }
+          - { os: macos-14, name: macos-universal }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-14' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+      - name: version
+        shell: bash
+        run: echo "VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_ENV"
+
+      # ---------------------------------------------------------------- Linux
+      - name: build (linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+          cargo build --release --locked
+          d=bytepet-$VERSION-${{ matrix.name }}
+          mkdir "$d"
+          cp target/release/bytepet README.md assets/icon.png packaging/linux/bytepet.desktop packaging/linux/install.sh "$d/"
+          tar czf "$d.tar.gz" "$d"
+          echo "ASSET=$d.tar.gz" >> "$GITHUB_ENV"
+
+      # -------------------------------------------------------------- Windows
+      - name: build (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cargo build --release --locked
+          d=bytepet-$VERSION-${{ matrix.name }}
+          mkdir "$d"
+          cp target/release/bytepet.exe README.md "$d/"
+          7z a "$d.zip" "$d" > /dev/null
+          echo "ASSET=$d.zip" >> "$GITHUB_ENV"
+
+      # ---------------------------------------------------------------- macOS
+      - name: build (macos)
+        if: runner.os == 'macOS'
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+          app=Bytepet.app
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          lipo -create -output "$app/Contents/MacOS/bytepet" \
+            target/aarch64-apple-darwin/release/bytepet target/x86_64-apple-darwin/release/bytepet
+          sed "s/VERSION/$VERSION/g" packaging/macos/Info.plist > "$app/Contents/Info.plist"
+          cp assets/icon.icns "$app/Contents/Resources/icon.icns"
+          # Ad-hoc signature only: not notarized, so Gatekeeper asks on first launch.
+          codesign --force --deep --sign - "$app"
+          d=bytepet-$VERSION-${{ matrix.name }}
+          mkdir "$d" && mv "$app" "$d/" && cp README.md "$d/"
+          ditto -c -k --keepParent "$d" "$d.zip"
+          echo "ASSET=$d.zip" >> "$GITHUB_ENV"
+
+      - name: smoke test (headless render)
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            Windows) exe=target/release/bytepet.exe ;;
+            macOS)   exe=target/aarch64-apple-darwin/release/bytepet ;;
+            *)       exe=target/release/bytepet ;;
+          esac
+          "$exe" --new --save smoke.json --screenshot smoke.png
+          test -s smoke.png
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bytepet-${{ matrix.name }}
+          path: ${{ env.ASSET }}
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, lint, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          draft: false
