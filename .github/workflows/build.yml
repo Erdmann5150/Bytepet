@@ -121,9 +121,27 @@ jobs:
           name: bytepet-${{ matrix.name }}
           path: ${{ env.ASSET }}
 
+  # The player's manual and quick reference card, drawn from this build's content and art.
+  manual:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo run --example export_art --no-default-features -- art/
+      - name: build the PDFs
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet reportlab
+          .venv/bin/python tools/build_manual.py art/ dist/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bytepet-manual
+          path: dist/*.pdf
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, lint, package]
+    needs: [test, lint, package, manual]
     runs-on: ubuntu-latest
     permissions:
       contents: write
