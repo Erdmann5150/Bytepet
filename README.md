@@ -24,6 +24,10 @@ Download the build for your OS from the [latest release](https://github.com/Erdm
 It's a single program of about 8 MB with nothing else to install. On Linux it needs
 glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later).
 
+Every download includes the [Player's Manual](https://github.com/Erdmann5150/Bytepet/releases/latest/download/Bytepet_Manual.pdf)
+and a two-page [Quick Reference](https://github.com/Erdmann5150/Bytepet/releases/latest/download/Bytepet_Quick_Reference.pdf)
+card as PDFs, and the links here always get the newest ones.
+
 ## On your desktop
 
 Bytepet opens as a floating, egg-shaped device in the bottom-right corner. Clicks on the
@@ -185,8 +189,14 @@ cargo test --no-default-features -- --ignored                   # plus a long ra
 cargo run --example export_art --no-default-features -- art/    # every sprite and screen as PNG
 ```
 
-CI runs the tests on all three platforms and builds the packages. Pushing a tag such as
-`v2.1.0` publishes a GitHub release with all three attached.
+CI runs the tests on all three platforms and builds the packages and the two PDFs. Pushing a
+tag such as `v2.1.0` publishes a GitHub release with all of them attached. To build the PDFs
+yourself (Python 3.11+ and `pip install reportlab`):
+
+```bash
+cargo run --example export_art --no-default-features -- art/
+python3 tools/build_manual.py art/ dist/
+```
 
 ```
 content/          characters, props and game rules (TOML; embedded, overridable)
@@ -201,7 +211,7 @@ src/
   overlay.rs      the right-click settings menu
   desktop/        window, tray, notifications, sound, autostart, click-through
 tests/            end-to-end flows, two-device link tests, fuzzing
-tools/            build_manual.py: a PDF player's manual from the content and art
+tools/            build_manual.py: the manual and quick reference PDFs, from the content and art
 packaging/        macOS Info.plist, Linux .desktop file and installer
 ```
 

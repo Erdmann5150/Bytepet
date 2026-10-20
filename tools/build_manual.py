@@ -1,11 +1,12 @@
-"""Builds the Bytepet player's manual (PDF).
+"""Builds the Bytepet player's manual and the two-page quick reference card (PDF).
 
 Every number and name in the tables comes from content/*.toml, and every picture is a
-real render from the game, so the manual matches the build it ships with:
+real render from the game, so both match the build they ship with:
 
     cargo run --example export_art --no-default-features -- art/
-    python3 tools/build_manual.py art/ Bytepet_Manual.pdf
+    python3 tools/build_manual.py art/ dist/
 
+That writes Bytepet_Manual.pdf and Bytepet_Quick_Reference.pdf into dist/.
 Needs Python 3.11+ and reportlab.
 """
 import os
@@ -23,7 +24,7 @@ from reportlab.platypus import (BaseDocTemplate, CondPageBreak, Frame, Image, Ke
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IMG = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "art")
-OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, "Bytepet_Manual.pdf")
+OUT_DIR = sys.argv[2] if len(sys.argv) > 2 else ROOT
 
 
 def load(name):
@@ -40,6 +41,8 @@ ITEMS = GAME["item"]
 JOBS = GAME["job"]
 MAIL = GAME["mail"]
 FRIENDS = GAME["friend_level"]
+# the age in days (as Status shows it) when a pet becomes an adult
+ADULT_AGE = (LIFE["egg"] + LIFE["baby"] + LIFE["child"] + LIFE["teen"]) // 86400
 
 
 def name(cid):
@@ -246,8 +249,6 @@ story += [P("Installing", "h2"),
           B("<b>Linux:</b> extract %s and run %s, then start Bytepet from your app menu. %s removes it again and "
             "keeps your pet." % (code("bytepet-%s-linux-x86_64.tar.gz" % VERSION), code("./install.sh"),
                                  code("./install.sh --remove"))),
-          B("<b>Coming from version 1?</b> Your pet comes along. Bytepet 2 reads the old save file and converts "
-            "it automatically."),
           P("Your first egg", "h2"),
           P("Bytepet appears near the bottom-right corner of your screen; drag it wherever you like. First it "
             "asks for a name. Type it on your keyboard and press Enter, or use the buttons: <b>A</b> cycles "
@@ -277,8 +278,9 @@ story += [dev, Spacer(1, 4),
                  ["Click A, B or C", "Presses that button"],
                  ["Click an icon", "Opens it, even from inside another menu"],
                  ["Click the screen", "B: choose"],
-                 ["Scroll wheel", "A: next item"],
-                 ["Right-click", "C: back. On the home screen it opens the settings menu instead."],
+                 ["Scroll wheel", "Down: next item (A). Up: previous item."],
+                 ["Right-click", "C: back. On the home screen with no icon selected, it opens the settings menu "
+                                 "instead."],
                  ["Drag the shell or screen", "Moves Bytepet"]],
                 [1.8 * inch, CW - 1.8 * inch])]
 
@@ -330,7 +332,8 @@ menu.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING"
 story += [P("Living on your desktop", "h2"),
           P("Bytepet has no window frame, just the device floating above your other windows, and clicks on the "
             "empty space around it go through to whatever is behind. <b>Drag</b> the shell to move it; it "
-            "remembers its spot. <b>Right-click</b> it on the home screen to open the menu. Click a row to "
+            "remembers its spot. <b>Right-click</b> it on the home screen, with no icon selected, to open the menu. "
+            "Click a row to "
             "change it, or use A/Z and the arrow keys to move, B/Enter to choose and C/Esc to close:"),
           menu, Spacer(1, 6), sizes, Spacer(1, 4),
           tip("On Windows and macOS, Bytepet doesn't appear in the taskbar or Dock. Click its tray icon "
@@ -359,7 +362,7 @@ story += [strip, Spacer(1, 8),
                                                     "decide which child you get. Can't play games or link yet."],
                  ["<b>Child</b>", dur(LIFE["child"]), "Mini-games, mail and school letters begin."],
                  ["<b>Teen</b>", dur(LIFE["teen"]), "Becomes one of three teens depending on its highest skill."],
-                 ["<b>Adult</b>", "from about day %d" % ((LIFE["baby"] + LIFE["child"] + LIFE["teen"]) // 86400 + 1),
+                 ["<b>Adult</b>", "from age %d" % ADULT_AGE,
                   "Job offers arrive. The matchmaker is open from age %d." % LIFE["matchmaker_age_days"]],
                  ["<b>Senior</b>", "from age %d" % LIFE["senior_age_days"],
                   "Happens if your adult never married. Seniors can still marry, but only another senior."]],
@@ -605,8 +608,8 @@ story += [P("Connecting", "h2"),
           Spacer(1, 6),
           tip("The first time you HOST, Windows or macOS asks whether to allow network access. Allow it on private "
               "networks. Bytepet uses TCP port 41975 (or the next free one) and UDP port 41976. To try linking on "
-              "one computer, run two copies with separate saves: %s and %s. Both sides need Bytepet 2; version 1 "
-              "can't link with it." % (code("bytepet --save a.json"), code("bytepet --save b.json")), "NETWORK")]
+              "one computer, run two copies with separate saves: %s and %s."
+              % (code("bytepet --save a.json"), code("bytepet --save b.json")), "NETWORK")]
 
 # 10 marriage
 story += section(10, "Marriage and generations", "Marrying is how your family line continues. The parent moves "
@@ -711,15 +714,269 @@ def keep_blocks(items):
     return out
 
 
+# ------------------------------------------------------------------ quick reference card
+# Two letter pages in two columns: everything a player looks up mid-game, nothing they read once.
+QM = 0.5 * inch                   # page margin
+QG = 0.28 * inch                  # gap between the columns
+QW = (PW - 2 * QM - QG) / 2       # column width
+QTOP = 0.62 * inch                # header band
+
+qs = {
+    "h": ParagraphStyle("qh", fontName="Helvetica-Bold", fontSize=9.5, leading=11.5, textColor=PINK, spaceBefore=8,
+                        spaceAfter=3),
+    "body": ParagraphStyle("qbody", fontName="Helvetica", fontSize=8.4, leading=11, textColor=INK, spaceAfter=3),
+    "cell": ParagraphStyle("qcell", fontName="Helvetica", fontSize=8, leading=10, textColor=INK),
+    "th": ParagraphStyle("qth", fontName="Helvetica-Bold", fontSize=7.6, leading=9.5, textColor=colors.white),
+    "bullet": ParagraphStyle("qbullet", fontName="Helvetica", fontSize=8.4, leading=11, textColor=INK, leftIndent=10,
+                             bulletIndent=1, spaceAfter=1.5),
+}
+
+
+def qtable(rows, widths, header=True):
+    """A compact table sized to a column (widths are fractions of it)."""
+    data = [[Paragraph(c, qs["th"] if header and i == 0 else qs["cell"]) if isinstance(c, str) else c for c in row]
+            for i, row in enumerate(rows)]
+    t = Table(data, colWidths=[w * QW for w in widths])
+    st = [("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LINEBELOW", (0, 0), (-1, -1), 0.4, RULE),
+          ("TOPPADDING", (0, 0), (-1, -1), 2.6), ("BOTTOMPADDING", (0, 0), (-1, -1), 2.6),
+          ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4)]
+    if header:
+        st.append(("BACKGROUND", (0, 0), (-1, 0), INK))
+    for i in range(1 if header else 0, len(data)):
+        if i % 2 == 0:
+            st.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#F9FAFB")))
+    t.setStyle(TableStyle(st))
+    return t
+
+
+def block(title, *items):
+    """A heading kept with what follows it."""
+    return KeepTogether([Paragraph(title.upper(), qs["h"])] + list(items))
+
+
+def qp(text):
+    return Paragraph(text, qs["body"])
+
+
+def qb(text):
+    return Paragraph(text, qs["bullet"], bulletText="•")
+
+
+def quick_page(c, doc):
+    c.saveState()
+    c.setFillColor(DARK)
+    c.rect(0, PH - QTOP, PW, QTOP, fill=1, stroke=0)
+    c.setFillColor(PINK)
+    c.rect(0, PH - QTOP - 3, PW, 3, fill=1, stroke=0)
+    path = os.path.join(IMG, "title.png")
+    title = Image(path)
+    th = 0.22 * inch
+    tw = th * title.imageWidth / title.imageHeight
+    c.drawImage(path, QM, PH - 0.41 * inch, width=tw, height=th, mask="auto")
+    c.setFillColor(colors.white)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(QM + tw + 12, PH - 0.38 * inch, "Quick reference")
+    c.setFillColor(colors.HexColor("#A1A6B4"))
+    c.setFont("Helvetica", 8)
+    c.drawRightString(PW - QM, PH - 0.38 * inch, "Version %s  ·  page %d" % (VERSION, doc.page))
+    c.setFillColor(MUTED)
+    c.setFont("Helvetica", 7)
+    c.drawCentredString(PW / 2, 0.32 * inch, "Every rule, character and screen is in the Bytepet Player's Manual.  "
+                                             "Not affiliated with Bandai or the Tamagotchi brand.")
+    c.restoreState()
+
+
+def quick_story():
+    s = []
+    s.append(block("Buttons", qtable(
+        [["Button", "Keys", "Does"],
+         ["<b>A</b>", "Z  A  J  1  ←", "Next icon or option"],
+         ["<b>B</b>", "X  S  K  2  ↓  Enter  Space", "Choose. Home screen, nothing selected: the clock"],
+         ["<b>C</b>", "C  D  L  3  →  Esc", "Back. Home screen: clear the selection, call your pet over"],
+         ["<b>A + C</b>", "M", "Mute or unmute"]],
+        [0.15, 0.36, 0.49]),
+        Spacer(1, 3), qp("<b>F1</b> help  ·  <b>F2</b> time speed  ·  <b>F3</b> shell design. Click Bytepet first so "
+                         "it has the keyboard.")))
+    s.append(block("Mouse", qtable(
+        [["Do this", "To"],
+         ["Click A, B or C", "Press that button"],
+         ["Click an icon", "Open it, even from inside another menu"],
+         ["Click the screen", "B: choose"],
+         ["Scroll down / up", "Next / previous option"],
+         ["Right-click", "C: back. On the home screen with nothing selected: the settings menu"],
+         ["Drag the shell or screen", "Move Bytepet"]],
+        [0.36, 0.64])))
+
+    icons = [("Status", "Age, weight, hearts, training, skills, GP, job"),
+             ("Food", "MEAL: +1 hunger. SNACK: +1 happy, more weight"),
+             ("Toilet", "Flush the poop"),
+             ("Game", "Mini-games, and WORK once hired"),
+             ("Lights", "Turn off when your pet falls asleep"),
+             ("Medicine", "Cures the skull (some need two doses)"),
+             ("Discipline", "SCOLD or PRAISE"),
+             ("Link", "Play with another Bytepet on your network"),
+             ("Town", "Mail, shop, items, partner, friends, album, setup"),
+             ("Call", "Lights up when your pet needs you")]
+    s.append(block("The ten icons", qtable(
+        [[img("icon_%d" % i, 0.19 * inch), "<b>%s</b>" % n, d] for i, (n, d) in enumerate(icons)],
+        [0.1, 0.22, 0.68], header=False)))
+
+    s.append(block("Skills", qtable(
+        [["Skill", "Raised by"],
+         ["<b>Humor</b>", "CLIMB, the Humor teacher, JOKES"],
+         ["<b>Gorgeous</b>", "TUG-O-WAR, the Gorgeous teacher, RIBBON"],
+         ["<b>Passion</b>", "APPLES, the Passion teacher, BALL"],
+         ["<b>GP</b> (money)", "MANHOLE, mail, WORK. You start with %d GP" % LIFE["start_gp"]]],
+        [0.26, 0.74])))
+
+    s.append(block("When your pet…", qtable(
+        [["You see", "Do this"],
+         ["Call icon, empty hearts", "Feed it (meal or snack) within %s" % dur(CARE["call_timeout"])],
+         ["Call icon, hearts are fine", "<b>Scold</b>: it's testing you"],
+         ["Call icon while asleep", "Turn the lights off"],
+         ["“NO!” at mealtime", "<b>Scold</b> within %s" % dur(CARE["refuse_window"])],
+         ["A dance with a music note", "<b>Praise</b> within %s" % dur(CARE["show_off_window"])],
+         ["A skull", "Medicine (maybe twice), or a MEDKIT"],
+         ["Poop", "Toilet. Left too long, it causes sickness"],
+         ["Town icon blinking", "Read your mail"],
+         ["Bytepet vanished", "Click the tray / menu-bar icon, or start it again"]],
+        [0.42, 0.58]),
+        Spacer(1, 3),
+        qp("An unanswered call becomes a <b>care mistake</b> after %s. Scolding for nothing costs a happy heart; "
+           "praising a fake call lowers training." % dur(CARE["call_timeout"]))))
+
+    def sleep(st):
+        return "%d:00 – %d:00" % tuple(STAGES[st]["sleep"]) if "sleep" in STAGES[st] else "Never"
+
+    stage_rows = [["Stage", "Lasts", "Lose a heart every", "Asleep"],
+                  ["Egg", dur(LIFE["egg"]), "–", "–"]]
+    for st, lasts in (("baby", dur(LIFE["baby"])), ("child", dur(LIFE["child"])), ("teen", dur(LIFE["teen"])),
+                      ("adult", "from age %d" % ADULT_AGE), ("senior", "age %d, if unmarried" % LIFE["senior_age_days"])):
+        stage_rows.append([st.title(), lasts, "%s hunger · %s happy" % (mins(STAGES[st]["hunger"]),
+                                                                       mins(STAGES[st]["happy"])), sleep(st)])
+    s.append(block("Life stages", qtable(stage_rows, [0.16, 0.25, 0.35, 0.24]),
+                   Spacer(1, 3), qp("Bedtimes follow your computer's clock at every time speed. Asleep, nothing "
+                                    "drains and no poop or mail arrives.")))
+
+    child_good, child_rough = find("child", grade="a"), find("child", grade="b")
+    s.append(block("Growing up",
+                   qb("<b>Baby → child:</b> 0–%d care mistakes gives %s, more gives %s."
+                      % (EVO["baby_good_mistakes"], name(child_good), name(child_rough))),
+                   qb("<b>Child → teen:</b> the highest skill picks the path."),
+                   qb("<b>Teen → adult:</b> the highest skill again, then mistakes made after the baby stage:"),
+                   Spacer(1, 2),
+                   qtable([["Adult", "Needs"],
+                           ["Secret", "%d+ in the path's skill, zero mistakes" % EVO["secret_skill"]],
+                           ["Best", "0–%d mistakes and training at %d%%+"
+                            % (EVO["best_mistakes"], EVO["best_discipline"])],
+                           ["Good", "Up to %d mistakes" % EVO["good_mistakes"]],
+                           ["Fair", "Up to %d mistakes" % EVO["fair_mistakes"]],
+                           ["Rough", "%d or more" % (EVO["fair_mistakes"] + 1)]],
+                          [0.22, 0.78])))
+
+    s.append(block("Mini-games", qtable(
+        [["Game", "Buttons", "Win"],
+         ["<b>CLIMB</b>", "A / C jump between vines, dodge rocks", "Dodge 12+"],
+         ["<b>TUG-O-WAR</b>", "Mash B", "Score 11+"],
+         ["<b>APPLES</b>", "A / C move the basket; bombs cost 2", "Catch 10+"],
+         ["<b>MANHOLE</b>", "A, B, C cover a manhole as a walker steps on it", "8+ (10 GP each)"]],
+        [0.25, 0.52, 0.23]),
+        Spacer(1, 3), qp("A win gives a happy heart and up to +15 skill. Every game burns 1 g.")))
+
+    s.append(block("School and jobs",
+                   qp("<b>School</b> (children and teens): accept the letter, pick a teacher, answer five sums. "
+                      "<b>A</b> picks the left number, <b>C</b> the right. +4 skill per right answer."),
+                   qtable([["Job", "Needs", "Base pay"]] +
+                          [["<b>%s</b>" % j["title"], "%s %d" % (j["skill"].title(), j["need"]), "%d GP" % j["pay"]]
+                           for j in JOBS],
+                          [0.42, 0.33, 0.25]),
+                   Spacer(1, 3),
+                   qp("Offers come by mail. Pass the interview (2 of 3 right), then <b>Game → WORK</b> once every %s "
+                      "for 40–120%% of base pay." % dur(CARE["work_cooldown"]))))
+
+    s.append(block("Mail", qtable(
+        [["Letter", "Brings"],
+         ["Gift", "%d–%d GP" % (min(MAIL["gp_amounts"]), max(MAIL["gp_amounts"]))],
+         ["Card", "+1 hunger and +1 happy heart"],
+         ["Snake in a box", "A prank: −1 happy heart"],
+         ["Parcel", "A free item"],
+         ["School invite", "Children and teens, once a day. Expires after %s" % dur(CARE["school_expires"])],
+         ["Job offer", "Adults, once a skill is close to a job's need"],
+         ["Love letter", "The matchmaker is waiting"]],
+        [0.3, 0.7]),
+        Spacer(1, 3), qp("Read it in Town → MAIL. Up to %d letters wait; none arrive while your pet sleeps."
+                         % CARE["mail_max_waiting"])))
+
+    s.append(block("Shop", qtable(
+        [["Item", "GP", "Does"]] + [["<b>%s</b>" % i["id"].title(), str(i["price"]), fx_text(i["effects"])]
+                                    for i in ITEMS],
+        [0.27, 0.13, 0.6])))
+
+    soulmate = max(FRIENDS, key=lambda f: f["links"])
+    rare = next(c["id"] for c in CHARS.values() if c.get("grade") == "rare")
+    s.append(block("Linking",
+                   qb("One computer picks <b>Link → HOST</b>; the other <b>Link → JOIN</b> (or <b>IP</b> to type the "
+                      "address). Same network only."),
+                   qb("Both screens show a 4-digit code. If it matches, the host presses <b>B</b>."),
+                   qb("The host picks <b>VISIT</b>, <b>GAME</b> (EATS, FLAGS or BUMP), <b>GIFT</b> or <b>MARRY</b>. "
+                      "Each link does one thing, then disconnects."),
+                   Spacer(1, 2),
+                   qtable([["Link game", "How to win"],
+                           ["<b>EATS</b>", "Mash B for 6 seconds"],
+                           ["<b>FLAGS</b>", "12 arrows: A left, B up, C right"],
+                           ["<b>BUMP</b>", "Press B while the bar is in the box, 5 tries"]],
+                          [0.25, 0.75]),
+                   Spacer(1, 3),
+                   qp("<b>Friendship:</b> " + "  ·  ".join("%d %s" % (f["links"], f["name"].title())
+                                                            for f in FRIENDS))))
+
+    s.append(block("Marriage",
+                   qb("<b>Matchmaker:</b> Town → PARTNER, from age %d (seniors any time)."
+                      % LIFE["matchmaker_age_days"]),
+                   qb("<b>By link:</b> two adults, or two seniors, at %s (%d links). Both players get an egg."
+                      % (soulmate["name"].title(), soulmate["links"])),
+                   qb("The egg is the next generation and keeps %d%% of its parent's skills. GP, items, friends and "
+                      "the album carry over." % round(CARE["legacy_skill_share"] * 100)),
+                   qb("Two seniors make a rare egg, which grows into %s." % name(rare))))
+
+    s.append(block("Settings",
+                   qp("Right-click the home screen, or the tray icon: <b>size</b>, <b>shell</b>, <b>time speed</b> "
+                      "(1×, 10×, 60×, 600×), <b>sound</b>, <b>always on top</b>, <b>notifications</b>, "
+                      "<b>launch at login</b>, help, hide and quit."),
+                   qp("Time keeps running while Bytepet is closed (up to 14 days). To pause it instead, set "
+                      "<b>Town → SETUP → WHEN OFF</b> to PAUSE.")))
+
+    s.append(block("Your save",
+                   qtable([["Windows", code("%APPDATA%\\Bytepet\\save.json")],
+                           ["macOS", code("~/Library/Application Support/Bytepet/save.json")],
+                           ["Linux", code("~/.local/share/bytepet/save.json")]],
+                          [0.22, 0.78], header=False),
+                   Spacer(1, 3), qp("Saved every 20 seconds and on exit. %s prints the exact path."
+                                    % code("bytepet --paths"))))
+    return s
+
+
 def build():
-    doc = BaseDocTemplate(OUT, pagesize=letter, leftMargin=M, rightMargin=M, topMargin=0.85 * inch,
+    os.makedirs(OUT_DIR, exist_ok=True)
+    out = os.path.join(OUT_DIR, "Bytepet_Manual.pdf")
+    doc = BaseDocTemplate(out, pagesize=letter, leftMargin=M, rightMargin=M, topMargin=0.85 * inch,
                           bottomMargin=0.8 * inch, title="Bytepet Player's Manual", author="Bytepet",
                           subject="Player's manual for Bytepet %s" % VERSION)
     frame = Frame(M, 0.8 * inch, CW, PH - 0.85 * inch - 0.8 * inch, id="f")
     doc.addPageTemplates([PageTemplate("cover", [frame], onPage=cover),
                           PageTemplate("body", [frame], onPage=normal)])
     doc.build(keep_blocks(story))
-    print("wrote", OUT)
+    print("wrote", out)
+
+    out = os.path.join(OUT_DIR, "Bytepet_Quick_Reference.pdf")
+    doc = BaseDocTemplate(out, pagesize=letter, title="Bytepet Quick Reference", author="Bytepet",
+                          subject="Quick reference for Bytepet %s" % VERSION)
+    top, bottom = PH - QTOP - 0.18 * inch, 0.5 * inch
+    cols = [Frame(QM + i * (QW + QG), bottom, QW, top - bottom, id="c%d" % i, leftPadding=0, rightPadding=0,
+                  topPadding=0, bottomPadding=0) for i in range(2)]
+    doc.addPageTemplates([PageTemplate("quick", cols, onPage=quick_page)])
+    doc.build(quick_story())
+    print("wrote", out)
 
 
 build()
