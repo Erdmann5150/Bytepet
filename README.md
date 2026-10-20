@@ -50,8 +50,9 @@ empty space around the egg pass through to whatever is behind it.
 - **Make it yours:** the menu's SHELL page has 12 preset designs, and pages for the body
   (colour, pattern, pattern colour, shine), buttons (colour, shape, letters), antenna (shape,
   colour, key ring) and screen (faceplate, rim, frame, corners, LCD colour). Each part changes on
-  its own. Click a setting for its next option, or use the left and right arrow keys; right-click
-  goes back a page. The tray menu's *Customize* submenu has the same settings.
+  its own, and RANDOM changes every part at once. Click a setting for its next option, or use the
+  left and right arrow keys; right-click goes back a page. The tray menu's *Customize* submenu
+  has the same settings.
 - **Tray or menu-bar icon:** click it to show or hide the pet, or right-click it for the same
   settings. On Windows and macOS Bytepet has no taskbar or Dock button, so the tray icon is
   how you bring it back after hiding it.
