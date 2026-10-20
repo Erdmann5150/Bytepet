@@ -359,21 +359,14 @@ impl App {
     }
 
     /// Mouse: click A/B/C or an icon; click the screen for B, scroll for A; right-click is C,
-    /// except on the home screen where it opens the menu. The menu takes clicks while open.
+    /// except on the home screen with nothing selected, where it opens the menu (see
+    /// `Core::right_click`). The menu takes clicks while open.
     fn mouse(&mut self, state: ElementState, button: MouseButton) {
         let Some(size) = self.window().map(|w| w.inner_size()) else { return };
         let (ww, wh) = (size.width as f32, size.height as f32);
         let down = state == ElementState::Pressed;
         match (button, down) {
-            (MouseButton::Right, true) => {
-                if self.core.overlay.is_open() {
-                    self.core.overlay.close();
-                } else if self.core.at_home() {
-                    self.core.overlay.open();
-                } else {
-                    self.core.tap(Button::C);
-                }
-            }
+            (MouseButton::Right, true) => self.core.right_click(),
             (MouseButton::Left, true) => {
                 if self.core.overlay.is_open() {
                     let env = self.env();

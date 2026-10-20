@@ -216,10 +216,32 @@ fn clicking_an_icon_switches_menus() {
     r.core.click_icon(0); // status, from two menus deep
     assert_eq!(r.top(), "Status");
     assert_eq!(r.core.stack_names(), vec!["Main", "Status"]);
-    // right-click is C inside menus; at home it's the settings menu (tested in overlay)
-    r.core.tap(Button::C);
+    // right-click is C inside menus
+    r.core.right_click();
     r.frames(1);
     assert!(r.core.at_home());
+}
+
+#[test]
+fn right_click_clears_the_selection_before_opening_settings() {
+    let mut r = Rig::with_pet(12, Stage::Child, "child_a");
+    r.core.click_icon(1); // food
+    r.core.right_click(); // back out of the food menu
+    r.frames(1);
+    assert!(r.core.at_home());
+    assert_eq!(r.core.ui.sel, 1);
+    r.core.right_click(); // clears the highlighted icon, no settings menu yet
+    assert_eq!(r.core.ui.sel, -1);
+    assert!(!r.core.overlay.is_open());
+    r.core.right_click(); // nothing selected: now it's the settings menu
+    assert!(r.core.overlay.is_open());
+    r.core.right_click(); // and right-click closes it again
+    assert!(!r.core.overlay.is_open());
+    // an icon picked with A is cleared the same way
+    r.tap(Button::A);
+    r.core.right_click();
+    assert!(!r.core.overlay.is_open());
+    assert_eq!(r.core.ui.sel, -1);
 }
 
 #[test]
