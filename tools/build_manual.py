@@ -314,7 +314,8 @@ sizes.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0,
 menu = Table([[img("menu_open", 2.1 * inch),
                table([["Menu item", "What it does"],
                       ["SIZE", "Small, Medium, Large or Huge."],
-                      ["SHELL", "Eight designs (see section 8)."],
+                      ["SHELL", "Pick one of twelve designs, or change each part of the device yourself "
+                                "(see section 8)."],
                       ["SPEED", "1× is real time; 10×, 60× and 600× are for trying "
                                 "things out."],
                       ["SOUND", "The beeps: off, or 25%, 50%, 75% or 100% volume. A and C together mute and unmute."],
@@ -557,17 +558,46 @@ story += [screens([("lcd_town", "The Town menu"), ("lcd_clock", "B on the main s
                  ["PARTNER", "The matchmaker (section 10)."],
                  ["FRIENDS", "Everyone you've linked with and your friendship level."],
                  ["ALBUM", "Every past pet: its form, generation, age, job, partner and how its story ended."],
-                 ["SETUP", "SPEED (1×, 10×, 60×, 600×), SOUND (OFF or a volume), SHELL (8 designs), "
+                 ["SETUP", "SPEED (1×, 10×, 60×, 600×), SOUND (OFF or a volume), SHELL (steps through the "
+                           "twelve designs), "
                            "WHEN OFF (RUNS or PAUSE: whether time passes while Bytepet is closed), MORE (opens the "
                            "desktop menu) and NEW EGG (start over)."]],
                 [1.1 * inch, CW - 1.1 * inch]),
           Spacer(1, 8)]
-SHELLS = ("berry", "lime", "ocean", "grape", "zebra", "flame", "donut", "camo")
-shell_row = Table([[img("shell_" + n, 0.82 * inch) for n in SHELLS], [P(n.title(), "cap") for n in SHELLS]],
-                  colWidths=[CW / 8] * 8)
+SHELLS = ("berry", "lime", "ocean", "grape", "zebra", "flame",
+          "donut", "camo", "cosmic", "sweet", "mint", "retro")
+shell_rows = []
+for k in range(0, len(SHELLS), 6):
+    row = SHELLS[k:k + 6]
+    shell_rows += [[img("shell_" + n, 0.95 * inch) for n in row], [P(n.title(), "cap") for n in row]]
+shell_row = Table(shell_rows, colWidths=[CW / 6] * 6)
 shell_row.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
                                ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
 story += [KeepTogether([P("Shell designs", "h2"), shell_row])]
+custom = Table([[img("menu_shell", 1.9 * inch),
+                 table([["Page", "Settings"],
+                        ["BODY", "COLOR (twenty colours), PATTERN (Plain, Zebra, Flame, Candy, Camo, Dots, Stripe or "
+                                 "Hearts), ACCENT (the pattern's colour; AUTO keeps its own) and GLOSS (the shine)."],
+                        ["BUTTONS", "COLOR (AUTO matches the body), SHAPE (Round, Square, Gem, Heart or Star) and "
+                                    "LETTERS (the A, B and C under them)."],
+                        ["ANTENNA", "SHAPE (Star, Heart, Moon, Bolt, Ball or None), COLOR and RING (the key ring "
+                                    "on top)."],
+                        ["SCREEN", "FACE (the panel around the screen), EDGE (its rim), FRAME (the border right "
+                                   "around the screen), CORNERS (Round, Soft or Square) and LCD (Classic, Gray, "
+                                   "Blue, Amber or Pink)."],
+                        ["RANDOM", "A surprise: every part at once."]],
+                       [0.9 * inch, CW - 2.2 * inch - 0.9 * inch])]],
+               colWidths=[2.2 * inch, CW - 2.2 * inch])
+custom.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
+story += [KeepTogether([
+    P("Make it your own", "h2"),
+    P("Choose <b>SHELL</b> in the desktop menu (right-click the home screen) for a page of its own. "
+      "<b>PRESET</b> steps through the designs above; the four pages below it change one part of the device "
+      "each, and the rest stays as it is. Click a setting to step to its next option, or use the "
+      "<b>left</b> and <b>right</b> arrow keys to go either way. Once you've changed anything, the shell "
+      "reads <b>CUSTOM</b>. The tray icon's <b>Customize</b> menu has the same settings. Right-click or "
+      "<b>C</b> goes back a page."),
+    custom])]
 
 # 9 linking
 soulmate = max(FRIENDS, key=lambda f: f["links"])

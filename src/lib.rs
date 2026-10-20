@@ -11,6 +11,7 @@ pub mod instance;
 pub mod layout;
 pub mod lcd;
 pub mod link;
+pub mod look;
 pub mod net;
 pub mod overlay;
 pub mod render;

@@ -45,8 +45,13 @@ Bytepet opens as a floating, egg-shaped device in the bottom-right corner. Click
 empty space around the egg pass through to whatever is behind it.
 
 - **Drag** the shell to move it. Bytepet remembers where you left it.
-- **Right-click** it on the home screen for the settings menu: size, shell design (8), time
-  speed, sound volume, always on top, notifications, launch at login, help, hide and quit.
+- **Right-click** it on the home screen for the settings menu: size, shell, time speed, sound
+  volume, always on top, notifications, launch at login, help, hide and quit.
+- **Make it yours:** the menu's SHELL page has 12 preset designs, and pages for the body
+  (colour, pattern, pattern colour, shine), buttons (colour, shape, letters), antenna (shape,
+  colour, key ring) and screen (faceplate, rim, frame, corners, LCD colour). Each part changes on
+  its own. Click a setting for its next option, or use the left and right arrow keys; right-click
+  goes back a page. The tray menu's *Customize* submenu has the same settings.
 - **Tray or menu-bar icon:** click it to show or hide the pet, or right-click it for the same
   settings. On Windows and macOS Bytepet has no taskbar or Dock button, so the tray icon is
   how you bring it back after hiding it.
@@ -85,8 +90,8 @@ Keys work while Bytepet has focus, so click it first.
 | Right-click | C; on the home screen with no icon selected, it opens the settings menu |
 | Drag the shell or the screen | move Bytepet |
 
-A+C together or `M` mutes. `F1` opens help, `F2` cycles time speed and `F3` cycles the shell
-design. When the game asks for a name or an IP address, type it on your keyboard.
+A+C together or `M` mutes. `F1` opens help, `F2` cycles time speed and `F3` cycles the preset
+shell designs. When the game asks for a name or an IP address, type it on your keyboard.
 
 ## How it plays
 
@@ -221,7 +226,8 @@ src/
   games/          the mini-games
   link.rs net.rs  the LINK menu and LAN networking
   core.rs         ties sim, screens, input and saving together, no OS dependencies
-  render.rs       draws the device; layout.rs has its geometry and shells
+  render.rs       draws the device; layout.rs has its geometry
+  look.rs         the customisable look: colours, shapes, patterns and the preset shells
   lcd.rs font.rs  the dot-matrix screen and its font
   save.rs         versioned save files
   instance.rs     one running copy per save file

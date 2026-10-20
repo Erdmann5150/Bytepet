@@ -246,12 +246,12 @@ impl Core {
         self.stack.len() == 1
     }
 
-    /// Right mouse button: closes the settings menu if it's open, otherwise C. Only on the home
-    /// screen with no icon selected does it open the settings menu, so the right-click that
-    /// clears the last selection doesn't also open it.
+    /// Right mouse button: goes up a page of the settings menu if it's open (closing it from the
+    /// top), otherwise C. Only on the home screen with no icon selected does it open the settings
+    /// menu, so the right-click that clears the last selection doesn't also open it.
     pub fn right_click(&mut self) {
         if self.overlay.is_open() {
-            self.overlay.close();
+            self.overlay.back();
         } else if self.at_home() && self.ui.sel < 0 {
             self.overlay.open();
         } else {
@@ -312,7 +312,7 @@ impl Core {
     }
 
     pub fn next_shell(&mut self) {
-        self.game.settings.shell = (self.game.settings.shell + 1) % crate::layout::SHELLS.len() as u32;
+        self.game.settings.next_shell();
     }
 
     // ------------------------------------------------------------------ per frame

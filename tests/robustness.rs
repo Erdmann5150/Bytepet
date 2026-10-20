@@ -81,14 +81,32 @@ fn device_render_has_see_through_corners() {
 }
 
 #[test]
-fn every_shell_and_the_menu_render() {
+fn every_shell_every_option_and_the_menu_render() {
     let mut r = Rig::with_pet(2, Stage::Teen, "teen_p");
     r.frames(3);
     let env = bytepet::overlay::Env { login: false, hide_label: "MINIMIZE" };
-    for shell in 0..8 {
-        r.core.game.settings.shell = shell;
+    for shell in 0..bytepet::look::PRESETS.len() as u32 {
+        r.core.game.settings.set_shell(shell);
         let pm = Renderer::new().render(&r.core, 0.55, 1.0, Some(&env), r.wall);
         assert!(pm.width() > 100);
+    }
+    // every option of every part draws, and a different option draws something different
+    use bytepet::look::{Field, Look};
+    for f in Field::ALL {
+        let mut seen = Vec::new();
+        for i in 0..f.count() {
+            // on a patterned shell, so the pattern's colour shows, in a colour that isn't first in
+            // the palette, so AUTO and the colour after it differ
+            let body = bytepet::look::PALETTE[9].1;
+            let mut look = Look { body, pattern: bytepet::look::Pattern::Dots, ..Look::default() };
+            look.set(f, i);
+            r.core.game.settings.look = look;
+            let pm = Renderer::new().render(&r.core, 0.4, 1.0, None, r.wall);
+            seen.push(pm.data().to_vec());
+        }
+        for i in 1..seen.len() {
+            assert!(seen[i] != seen[i - 1], "{f:?} options {} and {i} look the same", i - 1);
+        }
     }
     r.core.overlay.open();
     let pm = Renderer::new().render(&r.core, 0.4, 1.0, Some(&env), r.wall);

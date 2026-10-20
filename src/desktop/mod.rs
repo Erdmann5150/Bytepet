@@ -108,7 +108,7 @@ struct App {
     /// Unused scroll-wheel movement, in notches.
     wheel: f64,
     /// The menu panel the window's click-through shape currently includes.
-    shaped_panel: Option<(i32, i32, i32, i32)>,
+    shaped: Option<shape::Outline>,
     last_tick: Instant,
     visible: bool,
     quit: bool,
@@ -133,7 +133,7 @@ impl App {
             lcd_press: None,
             drag: None,
             wheel: 0.0,
-            shaped_panel: None,
+            shaped: None,
             last_tick: Instant::now(),
             visible: true,
             quit: false,
@@ -205,7 +205,9 @@ impl App {
         if !self.opts.windowed {
             #[cfg(target_os = "windows")]
             win_frame::install(&gfx.window);
-            shape::apply(&gfx.window, gfx.window.inner_size().width as f32 / VIEW.2, None);
+            let outline = shape::Outline::new(&self.core.game.settings.look, None);
+            shape::apply(&gfx.window, gfx.window.inner_size().width as f32 / VIEW.2, &outline);
+            self.shaped = Some(outline);
         }
         if !gfx.transparent && !self.opts.windowed {
             eprintln!("bytepet: this display can't do transparent windows; the corners will be black");
@@ -216,17 +218,20 @@ impl App {
     }
 
     /// While the menu is open its panel can reach past the shell, so the window's
-    /// click-through shape must include it (on Windows the shape also clips drawing).
+    /// click-through shape must include it (on Windows the shape also clips drawing). The
+    /// shape also follows the antenna and key ring, which the look can change.
     fn update_shape(&mut self) {
         if self.opts.windowed {
             return;
         }
         let Some(win) = self.window() else { return };
         let size = win.inner_size();
-        let want = self.core.overlay.is_open().then(|| overlay::panel(size.width as f32, size.height as f32).pixels());
-        if want != self.shaped_panel {
-            shape::apply(win, size.width as f32 / VIEW.2, want);
-            self.shaped_panel = want;
+        let o = &self.core.overlay;
+        let panel = o.is_open().then(|| o.panel(size.width as f32, size.height as f32).pixels());
+        let want = shape::Outline::new(&self.core.game.settings.look, panel);
+        if Some(want) != self.shaped {
+            shape::apply(win, size.width as f32 / VIEW.2, &want);
+            self.shaped = Some(want);
         }
     }
 
@@ -384,7 +389,7 @@ impl App {
                     self.core.click_icon(i);
                 } else if on_lcd(x, y) {
                     self.lcd_press = Some(self.cursor);
-                } else if !self.opts.windowed && on_device(x, y) {
+                } else if !self.opts.windowed && on_device(x, y, &self.core.game.settings.look) {
                     self.start_drag(self.cursor);
                 }
             }
@@ -447,10 +452,18 @@ impl App {
                 (Some(NamedKey::ArrowDown), _) | (_, "z") | (_, "a") => self.core.overlay.hover = Some((hover + 1) % n),
                 (Some(NamedKey::ArrowUp), _) => self.core.overlay.hover = Some((hover + n - 1) % n),
                 (Some(NamedKey::Enter), _) | (Some(NamedKey::Space), _) | (_, "x") => {
-                    let act = overlay::items(&self.core, &self.env())[hover].act;
+                    let act = overlay::items(&self.core, &self.env())[hover.min(n - 1)].act;
                     self.menu_act(act);
                 }
-                (Some(NamedKey::Escape), _) | (_, "c") => self.core.overlay.close(),
+                (Some(NamedKey::ArrowLeft), _) => {
+                    let env = self.env();
+                    overlay::adjust(&mut self.core, &env, -1);
+                }
+                (Some(NamedKey::ArrowRight), _) => {
+                    let env = self.env();
+                    overlay::adjust(&mut self.core, &env, 1);
+                }
+                (Some(NamedKey::Escape), _) | (_, "c") => self.core.overlay.back(),
                 _ => {}
             }
             return;
@@ -586,9 +599,10 @@ impl ApplicationHandler<UserEvent> for App {
                             .core
                             .overlay
                             .is_open()
-                            .then(|| overlay::panel(size.width as f32, size.height as f32).pixels());
-                        shape::apply(&g.window, size.width as f32 / VIEW.2, panel);
-                        self.shaped_panel = panel;
+                            .then(|| self.core.overlay.panel(size.width as f32, size.height as f32).pixels());
+                        let outline = shape::Outline::new(&self.core.game.settings.look, panel);
+                        shape::apply(&g.window, size.width as f32 / VIEW.2, &outline);
+                        self.shaped = Some(outline);
                     }
                     g.window.request_redraw();
                 }
@@ -608,10 +622,10 @@ impl ApplicationHandler<UserEvent> for App {
                         self.start_drag((sx, sy));
                     }
                 }
-                if self.core.overlay.page == Page::Menu {
+                if self.core.overlay.has_rows() {
                     if let Some(s) = self.window().map(|w| w.inner_size()) {
-                        let row =
-                            overlay::row_at(position.x as f32, position.y as f32, s.width as f32, s.height as f32);
+                        let (x, y) = (position.x as f32, position.y as f32);
+                        let row = overlay::row_at(&self.core.overlay, x, y, s.width as f32, s.height as f32);
                         if row.is_some() {
                             self.core.overlay.hover = row;
                         }

@@ -1,5 +1,5 @@
 //! Draws the device with tiny-skia into a transparent RGBA pixmap (premultiplied alpha).
-//! The static shell is cached per (shell, size); buttons, icons, the LCD and the settings
+//! The static shell is cached per (look, size); buttons, icons, the LCD and the settings
 //! menu are drawn every frame.
 
 use tiny_skia::{
@@ -11,6 +11,7 @@ use crate::core::Core;
 use crate::font::{for_each_dot, text_width};
 use crate::layout::*;
 use crate::lcd::{Lcd, H as LH, W as LW};
+use crate::look::{Antenna, ButtonShape, Corners, Look, Pattern};
 use crate::overlay::{self, Env, Page};
 use crate::rng::Pcg32;
 use crate::sprite::Sprite;
@@ -89,7 +90,7 @@ fn ptext(pm: &mut Pixmap, text: &str, x: f32, y: f32, s: f32, c: Color, center: 
 
 #[derive(Default)]
 pub struct Renderer {
-    shell_cache: Option<(u32, u32, u32, Pixmap)>,
+    shell_cache: Option<(Look, u32, u32, Pixmap)>,
 }
 
 /// Window size in pixels for a given scale (window pixels per design unit).
@@ -111,7 +112,7 @@ impl Renderer {
     /// `_dpi` is no longer used; it stays so callers don't change.
     pub fn render(&mut self, core: &Core, scale: f32, _dpi: f32, env: Option<&Env>, wall: f64) -> Pixmap {
         let (w, h) = window_size(scale);
-        let mut pm = self.shell(core.game.settings.shell, w.max(1), h.max(1), scale).clone();
+        let mut pm = self.shell(&core.game.settings.look, w.max(1), h.max(1), scale).clone();
         self.dynamic(&mut pm, core, scale, wall);
         if core.overlay.is_open() {
             if let Some(env) = env {
@@ -121,27 +122,33 @@ impl Renderer {
         pm
     }
 
-    fn shell(&mut self, shell_i: u32, w: u32, h: u32, scale: f32) -> &Pixmap {
-        let fresh = !matches!(&self.shell_cache, Some((s, cw, ch, _)) if *s == shell_i && *cw == w && *ch == h);
+    fn shell(&mut self, look: &Look, w: u32, h: u32, scale: f32) -> &Pixmap {
+        let fresh = !matches!(&self.shell_cache, Some((l, cw, ch, _)) if l == look && *cw == w && *ch == h);
         if fresh {
             let mut pm = Pixmap::new(w, h).expect("pixmap");
-            paint_shell(&mut pm, shell_i, scale);
-            self.shell_cache = Some((shell_i, w, h, pm));
+            paint_shell(&mut pm, look, scale);
+            self.shell_cache = Some((*look, w, h, pm));
         }
         &self.shell_cache.as_ref().unwrap().3
     }
 
     fn dynamic(&self, pm: &mut Pixmap, core: &Core, scale: f32, wall: f64) {
         let ts = design_ts(scale);
-        let sh = shell(core.game.settings.shell);
+        let look = &core.game.settings.look;
+        let button = look.button_color();
         // buttons
         for &(b, bx, by) in &BUTTONS {
             let down = core.held[b.index()];
             let y = by + if down { 3.0 } else { 0.0 };
-            fill(pm, circle(bx, y, BTN_R), rgba(lighten(sh.button, if down { 0.3 } else { 0.55 }), 255), ts, None);
-            stroke(pm, circle(bx, y, BTN_R), rgba(darken(sh.button, 0.3), 255), 1.5, ts);
+            let shape = || button_path(look.button_shape, bx, y, BTN_R);
+            fill(pm, shape(), rgba(lighten(button, if down { 0.3 } else { 0.55 }), 255), ts, None);
+            stroke(pm, shape(), rgba(darken(button, 0.3), 255), 1.5, ts);
             if !down {
-                fill(pm, circle(bx - 7.0, by - 8.0, 6.0), Color::from_rgba8(255, 255, 255, 220), ts, None);
+                let (hx, hy, hr) = match look.button_shape {
+                    ButtonShape::Star => (bx - 4.0, by - 5.0, 4.0),
+                    _ => (bx - 7.0, by - 8.0, 6.0),
+                };
+                fill(pm, circle(hx, hy, hr), Color::from_rgba8(255, 255, 255, 220), ts, None);
             }
         }
         // icons
@@ -153,6 +160,7 @@ impl Renderer {
             draw_sprite(pm, icon, rx, ry, ICON_SCALE, c, ts);
         }
         // LCD dots, aligned to whole pixels so they stay crisp at any size
+        let (_, lcd_off, lcd_on) = look.lcd.colors();
         let (lx, ly) = LCD_POS;
         let cell_px = CELL * scale;
         let gap = if cell_px >= 4.0 { (scale).clamp(0.5, 1.5) } else { 0.0 };
@@ -161,7 +169,7 @@ impl Renderer {
         for y in 0..LH {
             for x in 0..LW {
                 let v = core.shade[(y * LW + x) as usize].clamp(0.0, 1.0);
-                let c = [0, 1, 2].map(|k| (LCD_OFF[k] as f32 + (LCD_ON[k] as f32 - LCD_OFF[k] as f32) * v) as u8);
+                let c = [0, 1, 2].map(|k| (lcd_off[k] as f32 + (lcd_on[k] as f32 - lcd_off[k] as f32) * v) as u8);
                 let x0 = (ox + x as f32 * cell_px).round();
                 let y0 = (oy + y as f32 * cell_px).round();
                 let x1 = (ox + (x + 1) as f32 * cell_px).round() - gap;
@@ -195,25 +203,46 @@ fn draw_sprite(pm: &mut Pixmap, s: &Sprite, x: f32, y: f32, dot: f32, c: Color, 
     }
 }
 
+/// A button's outline, `r` being the round button's radius.
+fn button_path(shape: ButtonShape, cx: f32, cy: f32, r: f32) -> Option<Path> {
+    match shape {
+        ButtonShape::Round => circle(cx, cy, r),
+        ButtonShape::Square => rounded(cx - 0.9 * r, cy - 0.9 * r, 1.8 * r, 1.8 * r, 0.4 * r),
+        ButtonShape::Gem => poly(&[(cx, cy - 1.15 * r), (cx + 1.05 * r, cy), (cx, cy + 1.15 * r), (cx - 1.05 * r, cy)]),
+        ButtonShape::Heart => poly(&heart_points(cx, cy + 1.0, 1.12 * r, 0.0)),
+        ButtonShape::Star => poly(&star_points_at(cx, cy + 2.0, 1.25 * r, 0.62 * r, 0.0)),
+    }
+}
+
 /// The static parts of the device.
-fn paint_shell(pm: &mut Pixmap, shell_i: u32, scale: f32) {
+fn paint_shell(pm: &mut Pixmap, look: &Look, scale: f32) {
     let ts = design_ts(scale);
-    let sh = shell(shell_i);
-    let base = sh.base;
+    let base = look.body;
     let rim = darken(base, 0.35);
 
-    // key ring and star antenna, behind the shell
-    stroke(pm, circle(CX, CY - SHELL_B - 6.0, 16.0), rgba([190, 190, 200], 255), 4.0, ts);
-    let mut pb = PathBuilder::new();
-    pb.move_to(STAR.0 + 12.0, STAR.1 + 14.0);
-    pb.line_to(STAR.0 + 48.0, STAR.1 + 52.0);
-    stroke(pm, pb.finish(), rgba([200, 200, 210], 255), 6.0, ts);
-    let star = star_points();
-    fill(pm, poly(&star), rgba(lighten(base, 0.45), 215), ts, None);
-    stroke(pm, poly(&star), Color::WHITE, 2.0, ts);
-    let inner_star: Vec<(f32, f32)> =
-        star.iter().map(|&(x, y)| (x - 0.4 * (x - STAR.0), y - 0.4 * (y - STAR.1))).collect();
-    fill(pm, poly(&inner_star), Color::from_rgba8(255, 255, 255, 70), ts, None);
+    // key ring and antenna, behind the shell
+    if look.ring {
+        stroke(pm, circle(RING.0, RING.1, 16.0), rgba([190, 190, 200], 255), 4.0, ts);
+    }
+    let antenna = antenna_points(look.antenna);
+    if !antenna.is_empty() {
+        let mut pb = PathBuilder::new();
+        pb.move_to(STAR.0 + 12.0, STAR.1 + 14.0);
+        pb.line_to(STAR.0 + 48.0, STAR.1 + 52.0);
+        stroke(pm, pb.finish(), rgba([200, 200, 210], 255), 6.0, ts);
+        let color = look.antenna_color.unwrap_or(lighten(base, 0.45));
+        fill(pm, poly(&antenna), rgba(color, 215), ts, None);
+        stroke(pm, poly(&antenna), Color::WHITE, 2.0, ts);
+        // a highlight: the outline shrunk towards its middle
+        let (mx, my) = if look.antenna == Antenna::Star {
+            STAR
+        } else {
+            let n = antenna.len() as f32;
+            antenna.iter().fold((0.0, 0.0), |(sx, sy), &(x, y)| (sx + x / n, sy + y / n))
+        };
+        let inner: Vec<(f32, f32)> = antenna.iter().map(|&(x, y)| (x - 0.4 * (x - mx), y - 0.4 * (y - my))).collect();
+        fill(pm, poly(&inner), Color::from_rgba8(255, 255, 255, 70), ts, None);
+    }
 
     // the shell: dark rim, then a softly lit plastic body
     fill(pm, poly(&outer_egg()), rgba(rim, 255), ts, None);
@@ -236,16 +265,59 @@ fn paint_shell(pm: &mut Pixmap, shell_i: u32, scale: f32) {
     if let Some(path) = poly(&inner) {
         mask.fill_path(&path, FillRule::Winding, true, ts);
     }
-    let mut rng = Pcg32::new(shell_i as u64 + 11);
+    paint_pattern(pm, look, ts, &mask);
+    if look.gloss {
+        fill(pm, oval(CX - 150.0, CY - 238.0, 170.0, 90.0), Color::from_rgba8(255, 255, 255, 70), ts, Some(&mask));
+        fill(pm, oval(CX + 110.0, CY + 40.0, 40.0, 140.0), Color::from_rgba8(255, 255, 255, 40), ts, Some(&mask));
+    }
+
+    // faceplate and screen
+    let (fx, fy, fw, fh) = FACE;
+    let r = look.corners.radius();
+    let edge = look.edge.unwrap_or(darken(base, 0.45));
+    fill(pm, rounded(fx - 5.0, fy - 5.0, fw + 10.0, fh + 10.0, r + 4.0), rgba(edge, 255), ts, None);
+    fill(pm, rounded(fx, fy, fw, fh, r), rgba(look.face, 255), ts, None);
+    stroke(pm, rounded(fx, fy, fw, fh, r), rgba(darken(look.face, 0.09), 255), 2.0, ts);
+    let (lx, ly) = LCD_POS;
+    let (lw, lh) = (LW as f32 * CELL, LH as f32 * CELL);
+    let k = if look.corners == Corners::Square { 0.4 } else { 1.0 };
+    fill(pm, rounded(lx - 10.0, ly - 10.0, lw + 20.0, lh + 20.0, 8.0 * k), rgba(look.frame, 255), ts, None);
+    fill(pm, rounded(lx - 6.0, ly - 6.0, lw + 12.0, lh + 12.0, 5.0 * k), rgba(look.lcd.colors().0, 255), ts, None);
+
+    for &(b, bx, by) in &BUTTONS {
+        fill(pm, button_path(look.button_shape, bx, by + 4.0, BTN_R + 4.0), rgba(darken(base, 0.5), 255), ts, None);
+        if look.letters {
+            let label = match b {
+                crate::Button::A => "A",
+                crate::Button::B => "B",
+                crate::Button::C => "C",
+            };
+            // pointed shapes reach further down
+            let y = by + BTN_R + if look.button_shape == ButtonShape::Round { 12.0 } else { 16.0 };
+            // printed darker than the body, or lighter on a dark one
+            let ink = if luma(base) < 0.3 { lighten(base, 0.55) } else { darken(base, 0.55) };
+            ptext(pm, label, bx, y, 3.0, rgba(ink, 255), true, ts);
+        }
+    }
+    // the name is lighter than the body, or darker on a pale one
+    let name = if luma(base) > 0.75 { darken(base, 0.4) } else { lighten(base, 0.6) };
+    ptext(pm, "BYTEPET", CX, fy + fh + 14.0, 2.0, rgba(name, 255), true, ts);
+}
+
+/// The body's pattern, drawn through `mask`.
+fn paint_pattern(pm: &mut Pixmap, look: &Look, ts: Transform, mask: &Mask) {
+    let mask = Some(mask);
+    let mut rng = Pcg32::new(look.pattern.seed());
     let (w, h) = (CANVAS_W, CANVAS_H);
-    match sh.pattern {
+    let accent = rgba(look.accent_color(), 255);
+    match look.pattern {
         Pattern::Plain => {}
         Pattern::Zebra => {
             for i in -8..14 {
                 let x0 = i as f32 * 40.0;
                 let wob = rng.range(-20, 20) as f32;
                 let pts = [(x0, 0.0), (x0 + 16.0, 0.0), (x0 + 136.0 + wob, h), (x0 + 120.0, h)];
-                fill(pm, poly(&pts), Color::from_rgba8(25, 25, 25, 255), ts, Some(&mask));
+                fill(pm, poly(&pts), accent, ts, mask);
             }
         }
         Pattern::Flame => {
@@ -259,7 +331,7 @@ fn paint_shell(pm: &mut Pixmap, shell_i: u32, scale: f32) {
                     (x + 4.0, h - fh),
                     (x - 10.0, h - fh * 0.55),
                 ];
-                fill(pm, poly(&pts), Color::from_rgba8(255, 214, 64, 255), ts, Some(&mask));
+                fill(pm, poly(&pts), accent, ts, mask);
             }
         }
         Pattern::Sprinkles => {
@@ -267,69 +339,73 @@ fn paint_shell(pm: &mut Pixmap, shell_i: u32, scale: f32) {
             for _ in 0..160 {
                 let (x, y) = (rng.range(0, w as i64) as f32, rng.range(0, h as i64) as f32);
                 let a = rng.uniform(0.0, std::f64::consts::PI) as f32;
-                let c = cols[rng.below(cols.len())];
+                // an accent colour makes every sprinkle that colour
+                let c = look.accent.unwrap_or(cols[rng.below(cols.len())]);
                 let mut pb = PathBuilder::new();
                 pb.move_to(x, y);
                 pb.line_to(x + 9.0 * a.cos(), y + 9.0 * a.sin());
                 if let Some(path) = pb.finish() {
                     let s = Stroke { width: 4.0, line_cap: LineCap::Round, ..Stroke::default() };
-                    pm.stroke_path(&path, &paint(rgba(c, 255)), &s, ts, Some(&mask));
+                    pm.stroke_path(&path, &paint(rgba(c, 255)), &s, ts, mask);
                 }
             }
         }
         Pattern::Camo => {
-            let cols = [[70, 86, 52], [150, 140, 96], [52, 60, 40]];
+            let cols = match look.accent {
+                None => [[70, 86, 52], [150, 140, 96], [52, 60, 40]],
+                Some(a) => [darken(a, 0.25), lighten(a, 0.3), darken(a, 0.5)],
+            };
             for _ in 0..60 {
                 let (x, y) = (rng.range(0, w as i64) as f32, rng.range(0, h as i64) as f32);
                 let (ew, eh) = (rng.range(30, 80) as f32, rng.range(20, 50) as f32);
                 let c = cols[rng.below(cols.len())];
-                fill(pm, oval(x, y, ew, eh), rgba(c, 255), ts, Some(&mask));
+                fill(pm, oval(x, y, ew, eh), rgba(c, 255), ts, mask);
+            }
+        }
+        Pattern::Dots => {
+            for row in 0..16 {
+                for col in 0..12 {
+                    let x = col as f32 * 44.0 + if row % 2 == 1 { 22.0 } else { 0.0 };
+                    fill(pm, circle(x, 30.0 + row as f32 * 40.0, 10.0), accent, ts, mask);
+                }
+            }
+        }
+        Pattern::Stripes => {
+            for i in 0..13 {
+                let y = 40.0 + i as f32 * 56.0;
+                let pts = [(0.0, y), (w, y - 40.0), (w, y - 16.0), (0.0, y + 24.0)];
+                fill(pm, poly(&pts), accent, ts, mask);
+            }
+        }
+        Pattern::Hearts => {
+            for row in 0..11 {
+                for col in 0..8 {
+                    let x = 20.0 + col as f32 * 60.0 + if row % 2 == 1 { 30.0 } else { 0.0 };
+                    let tilt = if (row + col) % 2 == 0 { -0.3 } else { 0.3 };
+                    fill(pm, poly(&heart_points(x, 40.0 + row as f32 * 58.0, 13.0, tilt)), accent, ts, mask);
+                }
             }
         }
     }
-    fill(pm, oval(CX - 150.0, CY - 238.0, 170.0, 90.0), Color::from_rgba8(255, 255, 255, 70), ts, Some(&mask));
-    fill(pm, oval(CX + 110.0, CY + 40.0, 40.0, 140.0), Color::from_rgba8(255, 255, 255, 40), ts, Some(&mask));
-
-    // faceplate and screen
-    let (fx, fy, fw, fh) = FACE;
-    fill(pm, rounded(fx - 5.0, fy - 5.0, fw + 10.0, fh + 10.0, 40.0), rgba(darken(base, 0.45), 255), ts, None);
-    fill(pm, rounded(fx, fy, fw, fh, 36.0), rgba([244, 242, 236], 255), ts, None);
-    stroke(pm, rounded(fx, fy, fw, fh, 36.0), rgba([222, 220, 212], 255), 2.0, ts);
-    let (lx, ly) = LCD_POS;
-    let (lw, lh) = (LW as f32 * CELL, LH as f32 * CELL);
-    fill(pm, rounded(lx - 10.0, ly - 10.0, lw + 20.0, lh + 20.0, 8.0), rgba([96, 100, 96], 255), ts, None);
-    fill(pm, rounded(lx - 6.0, ly - 6.0, lw + 12.0, lh + 12.0, 5.0), rgba(LCD_BG, 255), ts, None);
-
-    for &(b, bx, by) in &BUTTONS {
-        fill(pm, circle(bx, by + 4.0, BTN_R + 4.0), rgba(darken(base, 0.5), 255), ts, None);
-        let label = match b {
-            crate::Button::A => "A",
-            crate::Button::B => "B",
-            crate::Button::C => "C",
-        };
-        ptext(pm, label, bx, by + BTN_R + 12.0, 3.0, rgba(darken(base, 0.55), 255), true, ts);
-    }
-    ptext(pm, "BYTEPET", CX, fy + fh + 14.0, 2.0, rgba(lighten(base, 0.6), 255), true, ts);
 }
 
 fn draw_overlay(pm: &mut Pixmap, core: &Core, env: &Env) {
-    let p = overlay::panel(pm.width() as f32, pm.height() as f32);
+    let p = core.overlay.panel(pm.width() as f32, pm.height() as f32);
     let id = Transform::identity();
     let pink = Color::from_rgba8(255, 140, 200, 255);
     let white = Color::from_rgba8(238, 238, 244, 255);
     let dim = Color::from_rgba8(150, 152, 170, 255);
     let fs = p.fs;
     let row_text_y = |i: usize| p.top + i as f32 * p.row_h + fs;
-    let title = match core.overlay.page {
-        Page::Closed => return,
-        Page::Menu => "BYTEPET",
-        Page::Help => overlay::HELP_PAGES[core.overlay.help.min(overlay::HELP_PAGES.len() - 1)].0,
-    };
+    if !core.overlay.is_open() {
+        return;
+    }
+    let title = core.overlay.title();
     fill(pm, rounded(p.x, p.y, p.w, p.h, 3.0 * fs), Color::from_rgba8(24, 26, 36, 240), id, None);
     ptext(pm, title, p.x + 3.0 * fs, p.y + 2.0 * fs, fs, pink, false, id);
     match core.overlay.page {
         Page::Closed => {}
-        Page::Menu => {
+        Page::Menu | Page::Shell | Page::Part(_) => {
             for (i, it) in overlay::items(core, env).iter().enumerate() {
                 if core.overlay.hover == Some(i) {
                     fill(
