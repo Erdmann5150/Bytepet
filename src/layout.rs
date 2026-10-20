@@ -105,6 +105,13 @@ pub fn icon_rects() -> [(f32, f32, f32, f32); 10] {
     out
 }
 
+/// The LCD itself, a little padded: clicking it presses B.
+pub fn on_lcd(x: f32, y: f32) -> bool {
+    let (lx, ly) = LCD_POS;
+    let pad = 6.0;
+    x >= lx - pad && x <= lx + 32.0 * CELL + pad && y >= ly - pad && y <= ly + 16.0 * CELL + pad
+}
+
 pub fn icon_at(x: f32, y: f32) -> Option<usize> {
     icon_rects()
         .iter()

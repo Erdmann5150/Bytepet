@@ -271,8 +271,16 @@ ctrl = table([["Button", "Keyboard", "What it does"],
 dev = Table([[img("size_medium", 2.0 * inch), ctrl]], colWidths=[2.35 * inch, CW - 2.35 * inch])
 dev.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
 story += [dev, Spacer(1, 4),
-          P("Extra keys: <b>F1</b> help, <b>F2</b> change time speed, <b>F3</b> change shell design. You can also "
-            "click any icon to jump straight to it.")]
+          P("Extra keys: <b>F1</b> help, <b>F2</b> change time speed, <b>F3</b> change shell design."),
+          P("Playing with the mouse", "h2"),
+          table([["Mouse", "What it does"],
+                 ["Click A, B or C", "Presses that button"],
+                 ["Click an icon", "Opens it, even from inside another menu"],
+                 ["Click the screen", "B: choose"],
+                 ["Scroll wheel", "A: next item"],
+                 ["Right-click", "C: back. On the home screen it opens the settings menu instead."],
+                 ["Drag the shell or screen", "Moves Bytepet"]],
+                [1.8 * inch, CW - 1.8 * inch])]
 
 icon_info = [
     ("Status", "Name, age, weight, generation, hunger, happiness, training meter, the three skills, Gotchi "
@@ -322,8 +330,8 @@ menu.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING"
 story += [P("Living on your desktop", "h2"),
           P("Bytepet has no window frame, just the device floating above your other windows, and clicks on the "
             "empty space around it go through to whatever is behind. <b>Drag</b> the shell to move it; it "
-            "remembers its spot. <b>Right-click</b> it to open the menu (A/Z and the arrow keys move, B/Enter "
-            "chooses, C/Esc closes):"),
+            "remembers its spot. <b>Right-click</b> it on the home screen to open the menu. Click a row to "
+            "change it, or use A/Z and the arrow keys to move, B/Enter to choose and C/Esc to close:"),
           menu, Spacer(1, 6), sizes, Spacer(1, 4),
           tip("On Windows and macOS, Bytepet doesn't appear in the taskbar or Dock. Click its tray icon "
               "(notification area or menu bar) to show or hide it; its menu has Settings and Quit. Starting "

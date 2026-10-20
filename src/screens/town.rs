@@ -110,6 +110,9 @@ impl Screen for TownMenu {
     fn name(&self) -> &'static str {
         "TownMenu"
     }
+    fn leavable(&self) -> bool {
+        true
+    }
     fn update(&mut self, _cx: &mut Ctx, dt: f64) -> Tr {
         self.view.t += dt;
         Tr::None
@@ -283,6 +286,9 @@ impl Screen for Shop {
     fn name(&self) -> &'static str {
         "Shop"
     }
+    fn leavable(&self) -> bool {
+        true
+    }
     fn update(&mut self, _cx: &mut Ctx, dt: f64) -> Tr {
         self.t += dt;
         Tr::None
@@ -334,6 +340,9 @@ pub struct Items {
 impl Screen for Items {
     fn name(&self) -> &'static str {
         "Items"
+    }
+    fn leavable(&self) -> bool {
+        true
     }
     fn update(&mut self, _cx: &mut Ctx, dt: f64) -> Tr {
         self.t += dt;
@@ -387,6 +396,9 @@ pub const SHELL_COUNT: u32 = 8;
 impl Screen for Setup {
     fn name(&self) -> &'static str {
         "Setup"
+    }
+    fn leavable(&self) -> bool {
+        true
     }
     fn update(&mut self, _cx: &mut Ctx, dt: f64) -> Tr {
         self.t += dt;

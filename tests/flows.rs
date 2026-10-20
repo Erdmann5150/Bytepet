@@ -202,3 +202,32 @@ fn time_can_be_paused_while_closed() {
     r.frames(1);
     assert!(r.core.game.pet.age_s - age < 5.0, "aged {}s", r.core.game.pet.age_s - age);
 }
+
+#[test]
+fn clicking_an_icon_switches_menus() {
+    let mut r = Rig::with_pet(10, Stage::Child, "child_a");
+    r.core.click_icon(1); // food
+    assert_eq!(r.top(), "FoodMenu");
+    r.core.click_icon(8); // town, straight from the food menu
+    assert_eq!(r.top(), "TownMenu");
+    r.tap(Button::A); // SHOP
+    r.tap(Button::B);
+    assert_eq!(r.top(), "Shop");
+    r.core.click_icon(0); // status, from two menus deep
+    assert_eq!(r.top(), "Status");
+    assert_eq!(r.core.stack_names(), vec!["Main", "Status"]);
+    // right-click is C inside menus; at home it's the settings menu (tested in overlay)
+    r.core.tap(Button::C);
+    r.frames(1);
+    assert!(r.core.at_home());
+}
+
+#[test]
+fn icons_dont_interrupt_a_game() {
+    let mut r = Rig::with_pet(11, Stage::Teen, "teen_g");
+    r.core.click_icon(3);
+    r.tap(Button::B); // CLIMB
+    assert_eq!(r.top(), "Game");
+    r.core.click_icon(1);
+    assert_eq!(r.top(), "Game");
+}

@@ -138,8 +138,15 @@ fn main() {
     r.core.overlay.open();
     r.core.overlay.hover = Some(1);
     r.device(&dir, "menu_open", 0.75);
-    r.core.overlay.page = Page::Help;
+    for (name, scale) in bytepet::overlay::SIZES {
+        r.device(&dir, &format!("menu_{}", name.to_lowercase()), scale);
+    }
+    r.core.overlay.open_help();
     r.device(&dir, "help_open", 0.75);
+    r.device(&dir, "help_small", 0.40);
+    r.core.overlay.next_help();
+    r.device(&dir, "help2_small", 0.40);
+    r.core.overlay.page = Page::Help;
 
     // LCD screens
     let mut r = Rig::new(Stage::Child, "child_a");

@@ -114,6 +114,12 @@ pub trait Screen {
         Tr::None
     }
     /// Clicking a bezel icon (only the main screen responds).
+    /// Whether clicking an icon may close this screen (and everything above the main
+    /// screen) to open another. True for plain menus; false mid-game, mid-animation or
+    /// mid-flow, where leaving would cut something short.
+    fn leavable(&self) -> bool {
+        false
+    }
     fn activate_icon(&mut self, _cx: &mut Ctx, _i: usize) -> Tr {
         Tr::None
     }
