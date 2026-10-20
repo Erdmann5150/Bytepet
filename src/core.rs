@@ -246,6 +246,19 @@ impl Core {
         self.stack.len() == 1
     }
 
+    /// Right mouse button: closes the settings menu if it's open, otherwise C. Only on the home
+    /// screen with no icon selected does it open the settings menu, so the right-click that
+    /// clears the last selection doesn't also open it.
+    pub fn right_click(&mut self) {
+        if self.overlay.is_open() {
+            self.overlay.close();
+        } else if self.at_home() && self.ui.sel < 0 {
+            self.overlay.open();
+        } else {
+            self.tap(Button::C);
+        }
+    }
+
     /// A quick press and release, for mouse clicks and the scroll wheel.
     pub fn tap(&mut self, b: Button) {
         self.press(b);
