@@ -197,7 +197,7 @@ src/
   link.rs net.rs  the LINK menu and LAN networking
   core.rs         ties sim, screens, input and saving together, no OS dependencies
   render.rs       draws the device; layout.rs has its geometry and shells
-  save.rs         save files and migrations
+  save.rs         versioned save files
   overlay.rs      the right-click settings menu
   desktop/        window, tray, notifications, sound, autostart, click-through
 tests/            end-to-end flows, two-device link tests, fuzzing
