@@ -239,7 +239,9 @@ pub struct Settings {
     pub muted: bool,
     /// Loudness in percent while not muted; one of [`VOLUMES`] unless a save says otherwise.
     pub volume: u32,
+    /// The preset in [`crate::look::PRESETS`] last chosen; `look` may have changed since.
     pub shell: u32,
+    pub look: crate::look::Look,
     /// Keep living while the app is closed.
     pub run_away: bool,
     pub ui: UiSettings,
@@ -247,7 +249,15 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { speed: 1, muted: false, volume: 100, shell: 0, run_away: true, ui: UiSettings::default() }
+        Settings {
+            speed: 1,
+            muted: false,
+            volume: 100,
+            shell: 0,
+            look: crate::look::Look::default(),
+            run_away: true,
+            ui: UiSettings::default(),
+        }
     }
 }
 
@@ -277,6 +287,22 @@ impl Settings {
             None => Some(VOLUMES[0]),
             Some(v) => VOLUMES.iter().copied().find(|&x| x > v),
         }
+    }
+
+    /// Switch to the next preset look.
+    pub fn next_shell(&mut self) {
+        self.set_shell(self.shell + 1);
+    }
+
+    pub fn set_shell(&mut self, i: u32) {
+        use crate::look::PRESETS;
+        self.shell = i % PRESETS.len() as u32;
+        self.look = PRESETS[self.shell as usize].look;
+    }
+
+    /// The preset's name, or CUSTOM once any part has been changed.
+    pub fn shell_name(&self) -> &'static str {
+        crate::look::preset_name(&self.look, self.shell)
     }
 
     /// "OFF" or the volume, e.g. "75%".

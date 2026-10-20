@@ -4,7 +4,7 @@
 
 use winit::event_loop::EventLoopProxy;
 
-use bytepet::layout::SHELLS;
+use bytepet::look::{preset_name, Look, Part, PRESETS};
 use bytepet::overlay::{size_name, Choice, SIZES};
 use bytepet::screens::town::SPEEDS;
 use bytepet::sim::{Settings, VOLUMES};
@@ -39,6 +39,7 @@ pub enum UserEvent {
 pub struct TrayState {
     size: usize,
     shell: u32,
+    look: Look,
     speed: u32,
     sound: Option<u32>,
     on_top: bool,
@@ -51,6 +52,7 @@ impl TrayState {
         TrayState {
             size: SIZES.iter().position(|x| x.0 == size_name(s.ui.scale)).unwrap_or(1),
             shell: s.shell,
+            look: s.look,
             speed: s.speed,
             sound: s.sound(),
             on_top: s.ui.on_top,
@@ -62,7 +64,9 @@ impl TrayState {
     fn picked(&self, c: Choice) -> bool {
         match c {
             Choice::Size(i) => i == self.size,
-            Choice::Shell(i) => i == self.shell,
+            // ticked only while the look is still that preset's
+            Choice::Shell(i) => PRESETS.get(i as usize).is_some_and(|p| p.name == preset_name(&self.look, self.shell)),
+            Choice::Look(f, i) => self.look.get(f) == Some(i),
             Choice::Speed(x) => x == self.speed,
             Choice::Sound(v) => v == self.sound,
             _ => false,
@@ -78,15 +82,45 @@ impl TrayState {
     }
 }
 
-/// The settings submenus: a title, then a label and choice per option.
-fn submenus() -> Vec<(&'static str, Vec<(String, Choice)>)> {
+/// A settings submenu: options to pick one of, or more submenus.
+enum Sub {
+    Picks(Vec<(String, Choice)>),
+    Subs(Vec<(String, Sub)>),
+}
+
+/// The settings submenus, each with its title.
+fn submenus() -> Vec<(String, Sub)> {
     let mut sound = vec![("Off".to_string(), Choice::Sound(None))];
     sound.extend(VOLUMES.iter().map(|&v| (format!("{v}%"), Choice::Sound(Some(v)))));
+    // Customize > Body > Color > Pink, ...
+    let parts = Part::ALL
+        .iter()
+        .map(|&p| {
+            let fields = p
+                .fields()
+                .iter()
+                .map(|&f| {
+                    let options = (0..f.count()).map(|i| (title_case(f.option_name(i)), Choice::Look(f, i))).collect();
+                    (f.title().to_string(), Sub::Picks(options))
+                })
+                .collect();
+            (title_case(p.name()), Sub::Subs(fields))
+        })
+        .collect();
     vec![
-        ("Size", SIZES.iter().enumerate().map(|(i, s)| (title_case(s.0), Choice::Size(i))).collect()),
-        ("Shell", SHELLS.iter().enumerate().map(|(i, s)| (title_case(s.name), Choice::Shell(i as u32))).collect()),
-        ("Speed", SPEEDS.iter().map(|&x| (format!("{x}\u{d7}"), Choice::Speed(x))).collect()),
-        ("Sound", sound),
+        (
+            "Size".into(),
+            Sub::Picks(SIZES.iter().enumerate().map(|(i, s)| (title_case(s.0), Choice::Size(i))).collect()),
+        ),
+        (
+            "Shell".into(),
+            Sub::Picks(
+                PRESETS.iter().enumerate().map(|(i, s)| (title_case(s.name), Choice::Shell(i as u32))).collect(),
+            ),
+        ),
+        ("Customize".into(), Sub::Subs(parts)),
+        ("Speed".into(), Sub::Picks(SPEEDS.iter().map(|&x| (format!("{x}\u{d7}"), Choice::Speed(x))).collect())),
+        ("Sound".into(), Sub::Picks(sound)),
     ]
 }
 
@@ -138,25 +172,46 @@ fn menu_id(cmd: TrayCmd) -> String {
     format!("{cmd:?}")
 }
 
+/// A submenu and everything under it, collecting its check items.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+fn build_sub(
+    title: &str,
+    sub: Sub,
+    state: &TrayState,
+    picks: &mut Vec<(tray_icon::menu::CheckMenuItem, Choice)>,
+) -> Option<tray_icon::menu::Submenu> {
+    use tray_icon::menu::{CheckMenuItem, Submenu};
+    let menu = Submenu::new(title, true);
+    match sub {
+        Sub::Picks(options) => {
+            for (label, c) in options {
+                let item = CheckMenuItem::with_id(menu_id(TrayCmd::Pick(c)), label, true, state.picked(c), None);
+                menu.append(&item).ok()?;
+                picks.push((item, c));
+            }
+        }
+        Sub::Subs(subs) => {
+            for (t, s) in subs {
+                menu.append(&build_sub(&t, s, state, picks)?).ok()?;
+            }
+        }
+    }
+    Some(menu)
+}
+
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 impl Tray {
     /// Must be called on the main thread after the event loop has started.
     pub fn new(proxy: EventLoopProxy<UserEvent>, icon: (Vec<u8>, u32, u32), state: &TrayState) -> Option<Tray> {
-        use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
+        use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
         use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
         let menu = Menu::new();
         menu.append(&MenuItem::with_id(menu_id(TrayCmd::Toggle), "Show / hide Bytepet", true, None)).ok()?;
         menu.append(&PredefinedMenuItem::separator()).ok()?;
         let mut picks = Vec::new();
-        for (title, options) in submenus() {
-            let sub = Submenu::new(title, true);
-            for (label, c) in options {
-                let item = CheckMenuItem::with_id(menu_id(TrayCmd::Pick(c)), label, true, state.picked(c), None);
-                sub.append(&item).ok()?;
-                picks.push((item, c));
-            }
-            menu.append(&sub).ok()?;
+        for (title, sub) in submenus() {
+            menu.append(&build_sub(&title, sub, state, &mut picks)?).ok()?;
         }
         let mut flags = Vec::new();
         for (label, f) in FLAGS {
@@ -221,6 +276,31 @@ pub struct SniTray {
     state: TrayState,
 }
 
+/// A submenu and everything under it, as radio groups.
+#[cfg(target_os = "linux")]
+fn sni_sub(title: String, sub: Sub, state: &TrayState) -> ksni::MenuItem<SniTray> {
+    use ksni::menu::{RadioGroup, RadioItem, SubMenu};
+    let submenu = match sub {
+        Sub::Picks(options) => {
+            // nothing is ticked if the save holds a value the menu doesn't offer
+            let selected = options.iter().position(|&(_, c)| state.picked(c)).unwrap_or(usize::MAX);
+            let choices: Vec<Choice> = options.iter().map(|&(_, c)| c).collect();
+            let group = RadioGroup {
+                selected,
+                select: Box::new(move |t: &mut SniTray, i: usize| {
+                    if let Some(&c) = choices.get(i) {
+                        let _ = t.proxy.send_event(UserEvent::Tray(TrayCmd::Pick(c)));
+                    }
+                }),
+                options: options.into_iter().map(|(label, _)| RadioItem { label, ..Default::default() }).collect(),
+            };
+            vec![group.into()]
+        }
+        Sub::Subs(subs) => subs.into_iter().map(|(t, s)| sni_sub(t, s, state)).collect(),
+    };
+    SubMenu { label: title, submenu, ..Default::default() }.into()
+}
+
 #[cfg(target_os = "linux")]
 impl ksni::Tray for SniTray {
     fn id(&self) -> String {
@@ -239,7 +319,7 @@ impl ksni::Tray for SniTray {
         let _ = self.proxy.send_event(UserEvent::Tray(TrayCmd::Toggle));
     }
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
-        use ksni::menu::{CheckmarkItem, RadioGroup, RadioItem, StandardItem, SubMenu};
+        use ksni::menu::{CheckmarkItem, StandardItem};
         let send = |cmd: TrayCmd| {
             move |t: &mut SniTray| {
                 let _ = t.proxy.send_event(UserEvent::Tray(cmd));
@@ -249,20 +329,8 @@ impl ksni::Tray for SniTray {
             StandardItem { label: label.into(), activate: Box::new(send(cmd)), ..Default::default() }.into()
         };
         let mut menu = vec![item("Show / hide Bytepet", TrayCmd::Toggle), ksni::MenuItem::Separator];
-        for (title, options) in submenus() {
-            // nothing is ticked if the save holds a value the menu doesn't offer
-            let selected = options.iter().position(|&(_, c)| self.state.picked(c)).unwrap_or(usize::MAX);
-            let choices: Vec<Choice> = options.iter().map(|&(_, c)| c).collect();
-            let group = RadioGroup {
-                selected,
-                select: Box::new(move |t: &mut SniTray, i: usize| {
-                    if let Some(&c) = choices.get(i) {
-                        let _ = t.proxy.send_event(UserEvent::Tray(TrayCmd::Pick(c)));
-                    }
-                }),
-                options: options.into_iter().map(|(label, _)| RadioItem { label, ..Default::default() }).collect(),
-            };
-            menu.push(SubMenu { label: title.into(), submenu: vec![group.into()], ..Default::default() }.into());
+        for (title, sub) in submenus() {
+            menu.push(sni_sub(title, sub, &self.state));
         }
         for (label, f) in FLAGS {
             let check = CheckmarkItem {

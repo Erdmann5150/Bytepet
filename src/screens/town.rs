@@ -412,7 +412,6 @@ pub struct Setup {
 /// WHENOFF: whether time keeps running while Bytepet is closed (caught up on the next start).
 const SETUP_ROWS: [&str; 6] = ["SPEED", "SOUND", "SHELL", "WHENOFF", "MORE", "NEWEGG"];
 pub const SPEEDS: [u32; 4] = [1, 10, 60, 600];
-pub const SHELL_COUNT: u32 = 8;
 
 impl Screen for Setup {
     fn name(&self) -> &'static str {
@@ -450,7 +449,7 @@ impl Screen for Setup {
                         s.speed = SPEEDS[(k + 1) % SPEEDS.len()];
                     }
                     "SOUND" => s.set_sound(s.next_sound()),
-                    "SHELL" => s.shell = (s.shell + 1) % SHELL_COUNT,
+                    "SHELL" => s.next_shell(),
                     "WHENOFF" => s.run_away = !s.run_away,
                     "MORE" => cx.ui.request = Some(Request::Settings),
                     _ => {
@@ -476,7 +475,7 @@ impl Screen for Setup {
         let (a, b) = match SETUP_ROWS[self.i] {
             "SPEED" => ("SPEED".to_string(), format!("{}X", s.speed)),
             "SOUND" => ("SOUND".to_string(), s.sound_label()),
-            "SHELL" => ("SHELL".to_string(), crate::layout::SHELLS[(s.shell % SHELL_COUNT) as usize].name.to_string()),
+            "SHELL" => ("SHELL".to_string(), s.shell_name().to_string()),
             "WHENOFF" => ("WHEN OFF".to_string(), if s.run_away { "RUNS" } else { "PAUSE" }.to_string()),
             "MORE" => ("MORE".to_string(), "B:MENU".to_string()),
             _ => ("NEW EGG".to_string(), "B:RESET".to_string()),

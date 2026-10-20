@@ -120,19 +120,19 @@ fn main() {
     // devices: every shell, and the three common sizes
     let mut r = Rig::new(Stage::Adult, "g_b");
     r.frames(30);
-    for i in 0..8 {
-        r.core.game.settings.shell = i;
+    for (i, p) in bytepet::look::PRESETS.iter().enumerate() {
+        r.core.game.settings.set_shell(i as u32);
         r.frames(1);
-        r.device(&dir, &format!("shell_{}", bytepet::layout::SHELLS[i as usize].name.to_lowercase()), 0.5);
+        r.device(&dir, &format!("shell_{}", p.name.to_lowercase()), 0.5);
     }
-    r.core.game.settings.shell = 1;
+    r.core.game.settings.set_shell(1);
     r.device(&dir, "device_cover", 2.0);
-    r.core.game.settings.shell = 0;
+    r.core.game.settings.set_shell(0);
     r.core.game.pet.poop = 0;
     r.frames(1);
     r.device(&dir, "app_icon_src", 1.9);
     for (name, s) in [("small", 0.40), ("medium", 0.55), ("large", 0.75)] {
-        r.core.game.settings.shell = 0;
+        r.core.game.settings.set_shell(0);
         r.device(&dir, &format!("size_{name}"), s);
     }
     r.core.overlay.open();
@@ -141,6 +141,13 @@ fn main() {
     for (name, scale) in bytepet::overlay::SIZES {
         r.device(&dir, &format!("menu_{}", name.to_lowercase()), scale);
     }
+    // the SHELL page and a part's page
+    r.core.overlay.page = Page::Shell;
+    r.core.overlay.hover = Some(1);
+    r.device(&dir, "menu_shell", 0.75);
+    r.core.overlay.page = Page::Part(bytepet::look::Part::Body);
+    r.core.overlay.hover = Some(0);
+    r.device(&dir, "menu_body", 0.75);
     r.core.overlay.open_help();
     r.device(&dir, "help_open", 0.75);
     r.device(&dir, "help_small", 0.40);
