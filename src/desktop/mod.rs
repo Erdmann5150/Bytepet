@@ -8,6 +8,8 @@ mod notify;
 mod shape;
 mod tray;
 #[cfg(target_os = "windows")]
+mod win_frame;
+#[cfg(target_os = "windows")]
 mod win_identity;
 
 use std::error::Error;
@@ -24,13 +26,13 @@ use winit::window::{Icon, Window, WindowId, WindowLevel};
 
 use bytepet::core::{now_unix, Core};
 use bytepet::layout::{button_at, icon_at, on_device, on_lcd, VIEW};
-use bytepet::overlay::{self, Act, DesktopCmd, Env, Page};
+use bytepet::overlay::{self, Act, Choice, DesktopCmd, Env, Page};
 use bytepet::render::{window_size, Renderer};
 use bytepet::screens::Key as ScreenKey;
 use bytepet::Button;
 
 use gfx::Gfx;
-use tray::{Tray, TrayCmd, UserEvent};
+use tray::{Flag, Tray, TrayCmd, TrayState, UserEvent};
 
 static TERMINATE: AtomicBool = AtomicBool::new(false);
 
@@ -92,6 +94,8 @@ struct App {
     gfx: Option<Gfx>,
     tray: Option<Tray>,
     tried_tray: bool,
+    /// The settings the tray menu last showed; `None` makes the next frame update it.
+    tray_state: Option<TrayState>,
     notifier: notify::Notifier,
     audio: audio::Audio,
     login: bool,
@@ -99,6 +103,8 @@ struct App {
     pressed: Option<Button>,
     /// Where a left press on the LCD started: a click there is B, a drag moves the window.
     lcd_press: Option<(f64, f64)>,
+    /// Windows: where in the window the drag moving it began (see `start_drag`).
+    drag: Option<(f64, f64)>,
     /// Unused scroll-wheel movement, in notches.
     wheel: f64,
     /// The menu panel the window's click-through shape currently includes.
@@ -118,12 +124,14 @@ impl App {
             gfx: None,
             tray: None,
             tried_tray: false,
+            tray_state: None,
             notifier: notify::Notifier::new(),
             audio: audio::Audio::new(),
             login: autostart::is_enabled(),
             cursor: (0.0, 0.0),
             pressed: None,
             lcd_press: None,
+            drag: None,
             wheel: 0.0,
             shaped_panel: None,
             last_tick: Instant::now(),
@@ -195,6 +203,8 @@ impl App {
         }
         let gfx = Gfx::new(el, a)?;
         if !self.opts.windowed {
+            #[cfg(target_os = "windows")]
+            win_frame::install(&gfx.window);
             shape::apply(&gfx.window, gfx.window.inner_size().width as f32 / VIEW.2, None);
         }
         if !gfx.transparent && !self.opts.windowed {
@@ -291,6 +301,63 @@ impl App {
         }
     }
 
+    fn choose(&mut self, c: Choice) {
+        if let Some(cmd) = overlay::choose(&mut self.core, c) {
+            self.desktop_cmd(cmd);
+        }
+    }
+
+    fn tray_cmd(&mut self, cmd: TrayCmd) {
+        match cmd {
+            TrayCmd::Toggle => {
+                if self.visible && !self.window().map(|w| w.is_minimized().unwrap_or(false)).unwrap_or(false) {
+                    self.hide();
+                } else {
+                    self.show();
+                }
+            }
+            TrayCmd::Pick(c) => self.choose(c),
+            TrayCmd::Flip(f) => {
+                let s = &self.core.game.settings;
+                let c = match f {
+                    Flag::OnTop => Choice::OnTop(!s.ui.on_top),
+                    Flag::Notify => Choice::Notify(!s.ui.notify),
+                    Flag::Login => Choice::Login(!self.login),
+                };
+                self.choose(c);
+            }
+            TrayCmd::Help => {
+                self.show();
+                self.core.overlay.open_help();
+            }
+            TrayCmd::Quit => self.quit = true,
+        }
+        self.tray_state = None;
+    }
+
+    /// Move the window with the mouse, from a press at `from` (window pixels). On Windows we
+    /// move it ourselves: `drag_window` runs the system's move loop, which holds up the event
+    /// loop, and so the animation, until the button is released.
+    fn start_drag(&mut self, from: (f64, f64)) {
+        if cfg!(target_os = "windows") {
+            self.drag = Some(from);
+            self.follow_drag();
+        } else if let Some(w) = self.window() {
+            let _ = w.drag_window();
+        }
+    }
+
+    /// Keep the point where the drag began under the cursor. The window has the mouse captured
+    /// while the button is down, so this keeps up even when the cursor outruns it.
+    fn follow_drag(&self) {
+        let (Some((sx, sy)), Some(w)) = (self.drag, self.window()) else { return };
+        let Ok(p) = w.outer_position() else { return };
+        let (dx, dy) = ((self.cursor.0 - sx).round() as i32, (self.cursor.1 - sy).round() as i32);
+        if dx != 0 || dy != 0 {
+            w.set_outer_position(PhysicalPosition::new(p.x + dx, p.y + dy));
+        }
+    }
+
     /// Mouse: click A/B/C or an icon; click the screen for B, scroll for A; right-click is C,
     /// except on the home screen where it opens the menu. The menu takes clicks while open.
     fn mouse(&mut self, state: ElementState, button: MouseButton) {
@@ -325,12 +392,11 @@ impl App {
                 } else if on_lcd(x, y) {
                     self.lcd_press = Some(self.cursor);
                 } else if !self.opts.windowed && on_device(x, y) {
-                    if let Some(w) = self.window() {
-                        let _ = w.drag_window();
-                    }
+                    self.start_drag(self.cursor);
                 }
             }
             (MouseButton::Left, false) => {
+                self.drag = None;
                 if let Some(b) = self.pressed.take() {
                     self.core.release(b);
                 }
@@ -467,13 +533,20 @@ impl App {
         self.last_tick = now;
         self.core.frame(dt);
         for t in self.core.take_sfx() {
-            if !self.core.game.settings.muted {
-                self.audio.play(t);
+            if let Some(volume) = self.core.game.settings.sound() {
+                self.audio.play(t, volume);
             }
         }
         self.audio.idle();
         for e in self.core.take_notices() {
             self.notifier.event(&e, &self.core.game, &self.core.content);
+        }
+        let state = TrayState::new(&self.core.game.settings, self.login);
+        if self.tray_state.as_ref() != Some(&state) {
+            if let Some(t) = &self.tray {
+                t.sync(&state);
+            }
+            self.tray_state = Some(state);
         }
         if self.core.ui.request.take().is_some() {
             self.show();
@@ -489,7 +562,8 @@ impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, el: &ActiveEventLoop) {
         if !self.tried_tray && !self.opts.windowed {
             self.tried_tray = true;
-            self.tray = Tray::new(self.proxy.clone(), tray::icon_rgba(&self.core.content));
+            let state = TrayState::new(&self.core.game.settings, self.login);
+            self.tray = Tray::new(self.proxy.clone(), tray::icon_rgba(&self.core.content), &state);
         }
         if self.gfx.is_none() {
             if let Err(e) = self.create_window(el) {
@@ -502,18 +576,7 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn user_event(&mut self, _el: &ActiveEventLoop, ev: UserEvent) {
         match ev {
-            UserEvent::Tray(TrayCmd::Toggle) => {
-                if self.visible && !self.window().map(|w| w.is_minimized().unwrap_or(false)).unwrap_or(false) {
-                    self.hide();
-                } else {
-                    self.show();
-                }
-            }
-            UserEvent::Tray(TrayCmd::Settings) => {
-                self.show();
-                self.core.overlay.open();
-            }
-            UserEvent::Tray(TrayCmd::Quit) => self.quit = true,
+            UserEvent::Tray(cmd) => self.tray_cmd(cmd),
             UserEvent::Show => self.show(),
         }
     }
@@ -543,14 +606,13 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x, position.y);
+                self.follow_drag();
                 // a press on the LCD that turns into a drag moves the window instead of pressing B
                 if let Some((sx, sy)) = self.lcd_press {
                     let (dx, dy) = (position.x - sx, position.y - sy);
                     if !self.opts.windowed && dx * dx + dy * dy > 36.0 {
                         self.lcd_press = None;
-                        if let Some(w) = self.window() {
-                            let _ = w.drag_window();
-                        }
+                        self.start_drag((sx, sy));
                     }
                 }
                 if self.core.overlay.page == Page::Menu {
@@ -573,6 +635,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 self.pressed = None;
                 self.lcd_press = None;
+                self.drag = None;
             }
             _ => {}
         }

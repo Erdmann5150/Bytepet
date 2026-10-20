@@ -33,9 +33,11 @@ frame. Clicks on the empty space around the egg pass through to whatever is behi
 
 - **Drag** the shell to move it. Bytepet remembers where you left it.
 - **Right-click** it on the home screen for the settings menu: size (Small, Medium, Large or
-  Huge), shell design (8), time speed, sound, always on top, notifications, launch at login,
-  help, hide and quit. Click a row to change it; the menu grows and shrinks with the device.
-- **Tray or menu-bar icon:** click it to show or hide the pet. On Windows and macOS,
+  Huge), shell design (8), time speed, sound (off, or 25 to 100% volume), always on top,
+  notifications, launch at login, help, hide and quit. Click a row to change it; the menu grows
+  and shrinks with the device.
+- **Tray or menu-bar icon:** click it to show or hide the pet, or right-click it for the same
+  settings as a system menu, plus help and quit. On Windows and macOS,
   Bytepet has no taskbar or Dock button, so the tray icon is how you bring it back after
   hiding it.
 - **Notifications:** you get a system notification when your pet calls, gets sick, hatches,
