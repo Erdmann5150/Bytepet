@@ -223,6 +223,27 @@ fn clicking_an_icon_switches_menus() {
 }
 
 #[test]
+fn scroll_wheel_moves_through_menus_both_ways() {
+    let mut r = Rig::with_pet(13, Stage::Child, "child_a");
+    // home: up from nothing selected lands on the last icon, down wraps to the first
+    r.core.scroll(true);
+    assert_eq!(r.core.ui.sel, 8);
+    r.core.scroll(false);
+    assert_eq!(r.core.ui.sel, 0);
+    r.core.scroll(true);
+    assert_eq!(r.core.ui.sel, 8);
+    // town: up wraps to the end, then down twice and up once ends on SHOP
+    r.core.click_icon(8);
+    r.core.scroll(true);
+    r.core.scroll(false);
+    r.core.scroll(false);
+    r.core.scroll(false);
+    r.core.scroll(true);
+    r.tap(Button::B);
+    assert_eq!(r.top(), "Shop");
+}
+
+#[test]
 fn right_click_clears_the_selection_before_opening_settings() {
     let mut r = Rig::with_pet(12, Stage::Child, "child_a");
     r.core.click_icon(1); // food

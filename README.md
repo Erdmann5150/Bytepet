@@ -66,7 +66,7 @@ Keys work while Bytepet has focus, so click it first.
 | Click A, B or C | that button |
 | Click an icon | opens it, even from inside another menu |
 | Click the screen | B |
-| Scroll wheel | A |
+| Scroll wheel | down for the next option (A), up for the previous one |
 | Right-click | C; on the home screen with no icon selected, it opens the settings menu |
 | Drag the shell or the screen | move Bytepet |
 
