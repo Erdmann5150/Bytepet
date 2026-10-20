@@ -41,9 +41,10 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
 
-  # The full desktop app, packaged per platform.
+  # The full desktop app, packaged per platform, with the manual PDFs alongside.
   package:
     name: package (${{ matrix.name }})
+    needs: manual
     strategy:
       fail-fast: false
       matrix:
@@ -58,6 +59,10 @@ jobs:
         with:
           targets: ${{ matrix.os == 'macos-14' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v8
+        with:
+          name: bytepet-manual
+          path: manual
       - name: version
         shell: bash
         run: echo "VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_ENV"
@@ -70,7 +75,7 @@ jobs:
           cargo build --release --locked
           d=bytepet-$VERSION-${{ matrix.name }}
           mkdir "$d"
-          cp target/release/bytepet README.md assets/icon.png packaging/linux/bytepet.desktop packaging/linux/install.sh "$d/"
+          cp target/release/bytepet README.md manual/*.pdf assets/icon.png packaging/linux/bytepet.desktop packaging/linux/install.sh "$d/"
           tar czf "$d.tar.gz" "$d"
           echo "ASSET=$d.tar.gz" >> "$GITHUB_ENV"
 
@@ -82,7 +87,7 @@ jobs:
           cargo build --release --locked
           d=bytepet-$VERSION-${{ matrix.name }}
           mkdir "$d"
-          cp target/release/bytepet.exe README.md "$d/"
+          cp target/release/bytepet.exe README.md manual/*.pdf "$d/"
           7z a "$d.zip" "$d" > /dev/null
           echo "ASSET=$d.zip" >> "$GITHUB_ENV"
 
@@ -101,7 +106,7 @@ jobs:
           # Ad-hoc signature only: not notarized, so Gatekeeper asks on first launch.
           codesign --force --deep --sign - "$app"
           d=bytepet-$VERSION-${{ matrix.name }}
-          mkdir "$d" && mv "$app" "$d/" && cp README.md "$d/"
+          mkdir "$d" && mv "$app" "$d/" && cp README.md manual/*.pdf "$d/"
           ditto -c -k --keepParent "$d" "$d.zip"
           echo "ASSET=$d.zip" >> "$GITHUB_ENV"
 

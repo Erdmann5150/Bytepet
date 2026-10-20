@@ -24,8 +24,9 @@ Download the build for your OS from the [latest release](https://github.com/Erdm
 It's a single program of about 8 MB with nothing else to install. On Linux it needs
 glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later).
 
-Each release also has the full **Player's Manual** (`Bytepet_Manual.pdf`) and a two-page
-**Quick Reference** card (`Bytepet_Quick_Reference.pdf`).
+Every download includes the [Player's Manual](https://github.com/Erdmann5150/Bytepet/releases/latest/download/Bytepet_Manual.pdf)
+and a two-page [Quick Reference](https://github.com/Erdmann5150/Bytepet/releases/latest/download/Bytepet_Quick_Reference.pdf)
+card as PDFs, and the links here always get the newest ones.
 
 ## On your desktop
 
