@@ -1,0 +1,201 @@
+# Game rules: timings, items, jobs and friendship. All times are in seconds of pet time
+# (at 1x speed that is real time). Copy into <save folder>/content/ to mod.
+
+[life]
+egg = 60
+baby = 3600          # how long each stage lasts
+child = 86400
+teen = 172800
+senior_age_days = 8  # unmarried adults become seniors at this age
+matchmaker_age_days = 5
+start_gp = 100
+
+[care]
+call_timeout = 900         # an unanswered call becomes a care mistake after this long
+recall_baby = 900          # an ignored need calls again after this long
+recall = 3600
+empty_to_sick = 14400      # empty hearts this long -> sick
+sick_to_gone_baby = 10800  # untreated sickness this long -> the pet goes home
+sick_to_gone = 43200
+poop_to_sick_baby = 1800
+poop_to_sick = 10800
+poop_to_sick_full = 3600   # when four poops have piled up
+overweight_margin = 25     # grams over the stage's base weight
+overweight_to_sick = 7200
+fake_call_min = 10800      # discipline: pretend calls
+fake_call_max = 25200
+show_off_min = 14400       # discipline: dances that deserve praise
+show_off_max = 28800
+show_off_window = 300
+refuse_window = 300
+refuse_chance = 0.18       # chance an untrained pet refuses a meal
+mail_min = 10800
+mail_max = 21600
+mail_max_waiting = 5
+school_expires = 43200
+work_cooldown = 7200
+legacy_skill_share = 0.1   # share of a parent's skills its egg inherits
+
+# Per-stage values. hunger/happy: seconds to lose one heart. sleep = [bedtime, wake hour].
+[stage.baby]
+hunger = 240
+happy = 300
+poop = [720, 1080]
+weight = 5
+
+[stage.child]
+hunger = 2400
+happy = 2100
+poop = [7200, 10800]
+weight = 10
+sleep = [20, 8]
+
+[stage.teen]
+hunger = 3000
+happy = 2700
+poop = [8400, 12000]
+weight = 15
+sleep = [21, 9]
+
+[stage.adult]
+hunger = 3600
+happy = 3300
+poop = [9000, 12600]
+weight = 20
+sleep = [22, 9]
+
+[stage.senior]
+hunger = 4200
+happy = 3900
+poop = [9000, 12600]
+weight = 20
+sleep = [21, 8]
+
+[evolution]
+secret_skill = 200         # secret adult: this much in the path's skill and no mistakes after the baby stage
+best_mistakes = 2          # plus a training meter of at least best_discipline
+best_discipline = 75
+good_mistakes = 4
+fair_mistakes = 8
+baby_good_mistakes = 1     # child_a (good) vs child_b
+
+[[item]]
+id = "JUICE"
+price = 40
+food = true
+effects = { happy = 1 }
+
+[[item]]
+id = "PUDDING"
+price = 60
+food = true
+effects = { happy = 1, hunger = 1, weight = 1 }
+
+[[item]]
+id = "CAKE"
+price = 100
+food = true
+effects = { happy = 2, weight = 3 }
+
+[[item]]
+id = "STEAK"
+price = 120
+food = true
+effects = { hunger = 2, weight = 2 }
+
+[[item]]
+id = "JOKES"
+price = 150
+effects = { humor = 8, happy = 1 }
+
+[[item]]
+id = "RIBBON"
+price = 150
+effects = { gorgeous = 8, happy = 1 }
+
+[[item]]
+id = "BALL"
+price = 150
+effects = { passion = 8, happy = 1 }
+
+[[item]]
+id = "MEDKIT"
+price = 200
+effects = { cure = 1 }
+
+# Jobs. game: office | science | chef | fire | rock
+[[job]]
+id = "OFFICE"
+title = "Office worker"
+skill = "humor"
+need = 40
+pay = 120
+game = "office"
+
+[[job]]
+id = "SCIENTST"
+title = "Scientist"
+skill = "humor"
+need = 140
+pay = 260
+game = "science"
+
+[[job]]
+id = "CHEF"
+title = "Chef"
+skill = "passion"
+need = 40
+pay = 120
+game = "chef"
+
+[[job]]
+id = "FIREFGTR"
+title = "Firefighter"
+skill = "passion"
+need = 140
+pay = 260
+game = "fire"
+
+[[job]]
+id = "ROCKSTAR"
+title = "Rock star"
+skill = "gorgeous"
+need = 60
+pay = 200
+game = "rock"
+
+# Letters the mailman can bring: kind = weight. School and job letters only arrive when they apply.
+[mail]
+gp = 30
+heart = 18
+trick = 8
+item = 18
+school = 40
+job = 45
+love = 6
+gp_amounts = [50, 80, 100, 150, 200, 300]
+items = ["JOKES", "RIBBON", "BALL", "JUICE", "PUDDING"]
+
+[[friend_level]]
+links = 1
+name = "ACQUAINT"
+
+[[friend_level]]
+links = 2
+name = "BUDDY"
+
+[[friend_level]]
+links = 3
+name = "FRIEND"
+
+[[friend_level]]
+links = 5
+name = "GOODFRND"
+
+[[friend_level]]
+links = 7
+name = "BESTFRND"
+
+[[friend_level]]
+links = 10
+name = "SOULMATE"
