@@ -30,7 +30,7 @@ pub fn install(window: &Window) {
     }
     unsafe {
         WINIT_PROC.store(GetWindowLongPtrW(hwnd, GWLP_WNDPROC), Ordering::SeqCst);
-        SetWindowLongPtrW(hwnd, GWLP_WNDPROC, frameless_proc as usize as isize);
+        SetWindowLongPtrW(hwnd, GWLP_WNDPROC, frameless_proc as *const () as isize);
     }
 }
 
