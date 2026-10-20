@@ -34,12 +34,13 @@ fn outlines(s: f32) -> (Poly, Poly, Poly, (i32, i32, i32, i32)) {
     (egg, star, stem, (rx0, ry0, rx1, ry1))
 }
 
-pub fn apply(window: &Window, scale: f32) {
+/// `panel` is the open menu (x, y, w, h in window pixels), which may reach past the shell.
+pub fn apply(window: &Window, scale: f32, panel: Option<(i32, i32, i32, i32)>) {
     let Ok(wh) = window.window_handle() else { return };
     let Ok(dh) = window.display_handle() else { return };
     match (wh.as_raw(), dh.as_raw()) {
         #[cfg(target_os = "windows")]
-        (RawWindowHandle::Win32(h), _) => windows_region(h.hwnd.get(), scale),
+        (RawWindowHandle::Win32(h), _) => windows_region(h.hwnd.get(), scale, panel),
         #[cfg(all(unix, not(target_os = "macos")))]
         (RawWindowHandle::Xlib(w), RawDisplayHandle::Xlib(d)) => {
             if let Some(display) = d.display {
@@ -49,6 +50,7 @@ pub fn apply(window: &Window, scale: f32) {
                     scale,
                     window.inner_size().width,
                     window.inner_size().height,
+                    panel,
                 );
             }
         }
@@ -57,10 +59,10 @@ pub fn apply(window: &Window, scale: f32) {
 }
 
 #[cfg(target_os = "windows")]
-fn windows_region(hwnd: isize, scale: f32) {
+fn windows_region(hwnd: isize, scale: f32, panel: Option<(i32, i32, i32, i32)>) {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::Graphics::Gdi::{
-        CombineRgn, CreateEllipticRgn, CreatePolygonRgn, DeleteObject, SetWindowRgn, RGN_OR, WINDING,
+        CombineRgn, CreateEllipticRgn, CreatePolygonRgn, CreateRectRgn, DeleteObject, SetWindowRgn, RGN_OR, WINDING,
     };
     let (egg, star, stem, ring) = outlines(scale);
     let pts = |v: &[(i32, i32)]| v.iter().map(|&(x, y)| POINT { x, y }).collect::<Vec<_>>();
@@ -76,13 +78,25 @@ fn windows_region(hwnd: isize, scale: f32) {
         let ring_rgn = CreateEllipticRgn(ring.0, ring.1, ring.2, ring.3);
         CombineRgn(region, region, ring_rgn, RGN_OR);
         DeleteObject(ring_rgn);
+        if let Some((x, y, w, h)) = panel {
+            let r = CreateRectRgn(x, y, x + w, y + h);
+            CombineRgn(region, region, r, RGN_OR);
+            DeleteObject(r);
+        }
         // the system owns `region` after this call
         SetWindowRgn(hwnd as _, region, 1);
     }
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn x11_input_shape(display: *mut std::ffi::c_void, window: std::ffi::c_ulong, scale: f32, w: u32, h: u32) {
+fn x11_input_shape(
+    display: *mut std::ffi::c_void,
+    window: std::ffi::c_ulong,
+    scale: f32,
+    w: u32,
+    h: u32,
+    panel: Option<(i32, i32, i32, i32)>,
+) {
     use bytepet::layout::point_in_poly;
     #[repr(C)]
     struct XRectangle {
@@ -104,8 +118,14 @@ fn x11_input_shape(display: *mut std::ffi::c_void, window: std::ffi::c_ulong, sc
     let sf: Vec<(f32, f32)> = star.iter().map(|&(x, y)| (x as f32, y as f32)).collect();
     let (rcx, rcy, rr) =
         ((ring.0 + ring.2) as f32 / 2.0, (ring.1 + ring.3) as f32 / 2.0, (ring.2 - ring.0) as f32 / 2.0);
+    let in_panel = |x: f32, y: f32| {
+        panel.is_some_and(|(px, py, pw, ph)| {
+            x >= px as f32 && x < (px + pw) as f32 && y >= py as f32 && y < (py + ph) as f32
+        })
+    };
     let inside = |x: f32, y: f32| {
-        point_in_poly(x, y, &ef)
+        in_panel(x, y)
+            || point_in_poly(x, y, &ef)
             || point_in_poly(x, y, &sf)
             || point_in_poly(x, y, &tf)
             || ((x - rcx).powi(2) + (y - rcy).powi(2)).sqrt() <= rr

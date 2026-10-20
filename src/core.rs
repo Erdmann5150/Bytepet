@@ -150,6 +150,11 @@ impl Core {
     }
 
     // ------------------------------------------------------------------ screen stack
+    /// Names of the open screens, bottom first (tests and debugging).
+    pub fn stack_names(&self) -> Vec<&'static str> {
+        self.stack.iter().map(|s| s.name()).collect()
+    }
+
     pub fn top_name(&self) -> &'static str {
         self.stack.last().map(|s| s.name()).unwrap_or("")
     }
@@ -225,12 +230,26 @@ impl Core {
         self.with_top(|sc, cx| sc.key(cx, k));
     }
 
+    /// Click one of the nine icons. From a menu this goes straight to the other menu, as
+    /// long as every screen open above the main one can be left (see `Screen::leavable`).
     pub fn click_icon(&mut self, i: usize) {
-        if i >= 9 || self.stack.len() != 1 {
+        if i >= 9 || self.stack.is_empty() || !self.stack[1..].iter().all(|s| s.leavable()) {
             return;
         }
+        self.stack.truncate(1);
         self.ui.sel = i as i32;
         self.with_top(|s, cx| s.activate_icon(cx, i));
+    }
+
+    /// On the main screen with nothing else open.
+    pub fn at_home(&self) -> bool {
+        self.stack.len() == 1
+    }
+
+    /// A quick press and release, for mouse clicks and the scroll wheel.
+    pub fn tap(&mut self, b: Button) {
+        self.press(b);
+        self.release(b);
     }
 
     pub fn toggle_mute(&mut self) {

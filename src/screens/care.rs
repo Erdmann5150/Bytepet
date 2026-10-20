@@ -438,6 +438,9 @@ impl Screen for Clock {
     fn name(&self) -> &'static str {
         "Clock"
     }
+    fn leavable(&self) -> bool {
+        true
+    }
     fn update(&mut self, _cx: &mut Ctx, dt: f64) -> Tr {
         self.t += dt;
         Tr::None
@@ -496,6 +499,9 @@ impl Default for Status {
 impl Screen for Status {
     fn name(&self) -> &'static str {
         "Status"
+    }
+    fn leavable(&self) -> bool {
+        true
     }
     fn update(&mut self, _cx: &mut Ctx, dt: f64) -> Tr {
         self.t += dt;
@@ -602,6 +608,9 @@ impl Screen for FoodMenu {
     fn name(&self) -> &'static str {
         "FoodMenu"
     }
+    fn leavable(&self) -> bool {
+        true
+    }
     fn update(&mut self, _cx: &mut Ctx, dt: f64) -> Tr {
         self.view.t += dt;
         Tr::None
@@ -687,6 +696,9 @@ impl Screen for DisciplineMenu {
     fn name(&self) -> &'static str {
         "DisciplineMenu"
     }
+    fn leavable(&self) -> bool {
+        true
+    }
     fn update(&mut self, _cx: &mut Ctx, dt: f64) -> Tr {
         self.view.t += dt;
         Tr::None
@@ -754,6 +766,9 @@ impl Default for GameMenu {
 impl Screen for GameMenu {
     fn name(&self) -> &'static str {
         "GameMenu"
+    }
+    fn leavable(&self) -> bool {
+        true
     }
     fn update(&mut self, _cx: &mut Ctx, dt: f64) -> Tr {
         self.view.t += dt;

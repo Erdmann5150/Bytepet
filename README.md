@@ -32,8 +32,9 @@ Bytepet opens as a floating, egg-shaped device in the bottom-right corner with n
 frame. Clicks on the empty space around the egg pass through to whatever is behind it.
 
 - **Drag** the shell to move it. Bytepet remembers where you left it.
-- **Right-click** it for the menu: size (Small, Medium, Large or Huge), shell design (8),
-  time speed, sound, always on top, notifications, launch at login, help, hide and quit.
+- **Right-click** it on the home screen for the settings menu: size (Small, Medium, Large or
+  Huge), shell design (8), time speed, sound, always on top, notifications, launch at login,
+  help, hide and quit. Click a row to change it; the menu grows and shrinks with the device.
 - **Tray or menu-bar icon:** click it to show or hide the pet. On Windows and macOS,
   Bytepet has no taskbar or Dock button, so the tray icon is how you bring it back after
   hiding it.
@@ -69,9 +70,19 @@ Keys work while Bytepet has focus, so click it first.
 | B | `X` `S` `K` `2` `↓` `Enter` `Space` | confirm (shows the clock on the main screen) |
 | C | `C` `D` `L` `3` `→` `Esc` `Backspace` | back / cancel (calls the pet over on the main screen) |
 
-Click the three buttons, or click the menu icons directly. A+C together or `M` mutes.
-`F1` opens help, `F2` cycles time speed and `F3` cycles the shell design. When the game asks for a
-name or an IP address, type it on your keyboard.
+Everything also works with the mouse alone:
+
+| Mouse | Does |
+|---|---|
+| Click A, B or C | that button |
+| Click an icon | opens it, even from inside another menu |
+| Click the screen | B (choose) |
+| Scroll wheel | A (next) |
+| Right-click | C (back); on the home screen it opens the settings menu |
+| Drag the shell or the screen | move Bytepet |
+
+A+C together or `M` mutes. `F1` opens help, `F2` cycles time speed and `F3` cycles the shell
+design. When the game asks for a name or an IP address, type it on your keyboard.
 
 ## How it plays
 
@@ -238,7 +249,9 @@ packaging/        macOS Info.plist, Linux .desktop file and installer
 ## Known limitations
 
 - **No code signing.** Windows SmartScreen and macOS Gatekeeper warn the first time you run it.
-- **Windows notifications** show under "Windows PowerShell", because an unsigned, uninstalled app can't
-  register its own notification identity.
+- **Windows notifications** are sent as "Bytepet" with its icon. For that, Bytepet registers itself
+  under `HKCU\Software\Classes\AppUserModelId\Bytepet.Desktop` and keeps a copy of its icon in its
+  save folder; delete both if you remove Bytepet. If registering fails, notifications fall back to
+  showing as "Windows PowerShell".
 - **Native Wayland:** no always-on-top, remembered position or click-through (see Linux notes).
 - **macOS click-through** relies on the system passing clicks through fully transparent pixels.

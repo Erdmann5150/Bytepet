@@ -107,14 +107,15 @@ impl Renderer {
     }
 
     /// Render the whole widget. `scale` is window pixels per design unit (size setting × DPI);
-    /// `dpi` sizes the settings menu text; `env` is needed only while the menu is open.
-    pub fn render(&mut self, core: &Core, scale: f32, dpi: f32, env: Option<&Env>, wall: f64) -> Pixmap {
+    /// `env` is needed only while the menu is open. The menu sizes itself to the window, so
+    /// `_dpi` is no longer used; it stays so callers don't change.
+    pub fn render(&mut self, core: &Core, scale: f32, _dpi: f32, env: Option<&Env>, wall: f64) -> Pixmap {
         let (w, h) = window_size(scale);
         let mut pm = self.shell(core.game.settings.shell, w.max(1), h.max(1), scale).clone();
         self.dynamic(&mut pm, core, scale, wall);
         if core.overlay.is_open() {
             if let Some(env) = env {
-                draw_overlay(&mut pm, core, env, dpi);
+                draw_overlay(&mut pm, core, env);
             }
         }
         pm
@@ -311,45 +312,46 @@ fn paint_shell(pm: &mut Pixmap, shell_i: u32, scale: f32) {
     ptext(pm, "BYTEPET", CX, fy + fh + 14.0, 2.0, rgba(lighten(base, 0.6), 255), true, ts);
 }
 
-fn draw_overlay(pm: &mut Pixmap, core: &Core, env: &Env, dpi: f32) {
-    let (ww, wh) = (pm.width() as f32, pm.height() as f32);
+fn draw_overlay(pm: &mut Pixmap, core: &Core, env: &Env) {
+    let p = overlay::panel(pm.width() as f32, pm.height() as f32);
     let id = Transform::identity();
     let pink = Color::from_rgba8(255, 140, 200, 255);
     let white = Color::from_rgba8(238, 238, 244, 255);
     let dim = Color::from_rgba8(150, 152, 170, 255);
+    let fs = p.fs;
+    let row_text_y = |i: usize| p.top + i as f32 * p.row_h + fs;
+    let title = match core.overlay.page {
+        Page::Closed => return,
+        Page::Menu => "BYTEPET",
+        Page::Help => overlay::HELP_PAGES[core.overlay.help.min(overlay::HELP_PAGES.len() - 1)].0,
+    };
+    fill(pm, rounded(p.x, p.y, p.w, p.h, 3.0 * fs), Color::from_rgba8(24, 26, 36, 240), id, None);
+    ptext(pm, title, p.x + 3.0 * fs, p.y + 2.0 * fs, fs, pink, false, id);
     match core.overlay.page {
         Page::Closed => {}
         Page::Menu => {
-            let items = overlay::items(core, env);
-            let (x, y, w, h, row_h, fs) = overlay::panel(ww, wh, items.len(), dpi);
-            fill(pm, rounded(x, y, w, h, 3.0 * fs), Color::from_rgba8(24, 26, 36, 238), id, None);
-            ptext(pm, "BYTEPET", x + 3.0 * fs, y + 1.5 * fs, fs, pink, false, id);
-            let top = y + row_h + 1.5 * fs;
-            for (i, it) in items.iter().enumerate() {
-                let ry = top + i as f32 * row_h;
+            for (i, it) in overlay::items(core, env).iter().enumerate() {
                 if core.overlay.hover == Some(i) {
                     fill(
                         pm,
-                        Rect::from_xywh(x + fs, ry - fs, w - 2.0 * fs, row_h).map(PathBuilder::from_rect),
+                        Rect::from_xywh(p.x + fs, p.top + i as f32 * p.row_h, p.w - 2.0 * fs, p.row_h)
+                            .map(PathBuilder::from_rect),
                         Color::from_rgba8(236, 72, 153, 200),
                         id,
                         None,
                     );
                 }
-                ptext(pm, it.label, x + 3.0 * fs, ry + fs * 0.5, fs, white, false, id);
+                ptext(pm, it.label, p.x + 3.0 * fs, row_text_y(i), fs, white, false, id);
                 if !it.value.is_empty() {
-                    let vx = x + w - 3.0 * fs - text_width(&it.value) as f32 * fs;
-                    ptext(pm, &it.value, vx, ry + fs * 0.5, fs, dim, false, id);
+                    let vx = p.x + p.w - 3.0 * fs - text_width(&it.value) as f32 * fs;
+                    ptext(pm, &it.value, vx, row_text_y(i), fs, dim, false, id);
                 }
             }
         }
         Page::Help => {
-            let lines = overlay::HELP;
-            let (x, y, w, h, row_h, fs) = overlay::panel(ww, wh, lines.len(), dpi);
-            fill(pm, rounded(x, y, w, h, 3.0 * fs), Color::from_rgba8(24, 26, 36, 238), id, None);
-            ptext(pm, "HELP", x + 3.0 * fs, y + 1.5 * fs, fs, pink, false, id);
+            let (_, lines) = overlay::HELP_PAGES[core.overlay.help.min(overlay::HELP_PAGES.len() - 1)];
             for (i, l) in lines.iter().enumerate() {
-                ptext(pm, l, x + 3.0 * fs, y + row_h + 2.0 * fs + i as f32 * row_h, fs, white, false, id);
+                ptext(pm, l, p.x + 3.0 * fs, row_text_y(i), fs, white, false, id);
             }
         }
     }

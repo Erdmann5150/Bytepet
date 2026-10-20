@@ -50,19 +50,26 @@ impl Notifier {
             return;
         }
         self.last.insert(key, now);
-        // showing can block briefly (D-Bus, Windows toast), so do it off the UI thread
-        std::thread::spawn(move || {
-            let _ = notify_rust::Notification::new().appname("Bytepet").summary(&title).body(&body).show();
-        });
+        show(title, body);
     }
+}
+
+/// Show a notification off the UI thread (it can block briefly on D-Bus or the toast service).
+fn show(title: String, body: String) {
+    std::thread::spawn(move || {
+        let mut n = notify_rust::Notification::new();
+        n.appname("Bytepet").summary(&title).body(&body);
+        #[cfg(target_os = "windows")]
+        if let Some(id) = super::win_identity::app_id() {
+            n.app_id(id);
+        }
+        let _ = n.show();
+    });
 }
 
 /// A one-off notification (startup problems), regardless of the per-kind rate limit.
 pub fn plain(title: &str, body: &str) {
-    let (title, body) = (title.to_string(), body.to_string());
-    std::thread::spawn(move || {
-        let _ = notify_rust::Notification::new().appname("Bytepet").summary(&title).body(&body).show();
-    });
+    show(title.to_string(), body.to_string());
 }
 
 fn title_case(s: &str) -> String {

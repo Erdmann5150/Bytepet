@@ -7,6 +7,8 @@ mod gfx;
 mod notify;
 mod shape;
 mod tray;
+#[cfg(target_os = "windows")]
+mod win_identity;
 
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,13 +17,13 @@ use std::time::{Duration, Instant};
 use tiny_skia::{Pixmap, PixmapPaint, Transform};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
-use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
+use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Icon, Window, WindowId, WindowLevel};
 
 use bytepet::core::{now_unix, Core};
-use bytepet::layout::{button_at, icon_at, on_device, VIEW};
+use bytepet::layout::{button_at, icon_at, on_device, on_lcd, VIEW};
 use bytepet::overlay::{self, Act, DesktopCmd, Env, Page};
 use bytepet::render::{window_size, Renderer};
 use bytepet::screens::Key as ScreenKey;
@@ -95,6 +97,12 @@ struct App {
     login: bool,
     cursor: (f64, f64),
     pressed: Option<Button>,
+    /// Where a left press on the LCD started: a click there is B, a drag moves the window.
+    lcd_press: Option<(f64, f64)>,
+    /// Unused scroll-wheel movement, in notches.
+    wheel: f64,
+    /// The menu panel the window's click-through shape currently includes.
+    shaped_panel: Option<(i32, i32, i32, i32)>,
     last_tick: Instant,
     visible: bool,
     quit: bool,
@@ -115,6 +123,9 @@ impl App {
             login: autostart::is_enabled(),
             cursor: (0.0, 0.0),
             pressed: None,
+            lcd_press: None,
+            wheel: 0.0,
+            shaped_panel: None,
             last_tick: Instant::now(),
             visible: true,
             quit: false,
@@ -184,7 +195,7 @@ impl App {
         }
         let gfx = Gfx::new(el, a)?;
         if !self.opts.windowed {
-            shape::apply(&gfx.window, gfx.window.inner_size().width as f32 / VIEW.2);
+            shape::apply(&gfx.window, gfx.window.inner_size().width as f32 / VIEW.2, None);
         }
         if !gfx.transparent && !self.opts.windowed {
             eprintln!("bytepet: this display can't do transparent windows; the corners will be black");
@@ -194,7 +205,23 @@ impl App {
         Ok(())
     }
 
+    /// While the menu is open its panel can reach past the shell, so the window's
+    /// click-through shape must include it (on Windows the shape also clips drawing).
+    fn update_shape(&mut self) {
+        if self.opts.windowed {
+            return;
+        }
+        let Some(win) = self.window() else { return };
+        let size = win.inner_size();
+        let want = self.core.overlay.is_open().then(|| overlay::panel(size.width as f32, size.height as f32).pixels());
+        if want != self.shaped_panel {
+            shape::apply(win, size.width as f32 / VIEW.2, want);
+            self.shaped_panel = want;
+        }
+    }
+
     fn redraw(&mut self) {
+        self.update_shape();
         let wall = now_unix();
         let env = self.env();
         let Some(win) = self.window() else { return };
@@ -264,46 +291,28 @@ impl App {
         }
     }
 
-    fn menu_rows(&self) -> usize {
-        match self.core.overlay.page {
-            Page::Help => overlay::HELP.len(),
-            _ => overlay::items(&self.core, &self.env()).len(),
-        }
-    }
-
+    /// Mouse: click A/B/C or an icon; click the screen for B, scroll for A; right-click is C,
+    /// except on the home screen where it opens the menu. The menu takes clicks while open.
     fn mouse(&mut self, state: ElementState, button: MouseButton) {
-        let Some(win) = self.window() else { return };
-        let size = win.inner_size();
-        let dpi = win.scale_factor() as f32;
-        match (button, state) {
-            (MouseButton::Right, ElementState::Pressed) => {
+        let Some(size) = self.window().map(|w| w.inner_size()) else { return };
+        let (ww, wh) = (size.width as f32, size.height as f32);
+        let down = state == ElementState::Pressed;
+        match (button, down) {
+            (MouseButton::Right, true) => {
                 if self.core.overlay.is_open() {
                     self.core.overlay.close();
-                } else {
+                } else if self.core.at_home() {
                     self.core.overlay.open();
+                } else {
+                    self.core.tap(Button::C);
                 }
             }
-            (MouseButton::Left, ElementState::Pressed) => {
+            (MouseButton::Left, true) => {
                 if self.core.overlay.is_open() {
-                    if self.core.overlay.page == Page::Help {
-                        self.core.overlay.page = Page::Menu;
-                        return;
-                    }
-                    let n = self.menu_rows();
-                    let row = overlay::row_at(
-                        self.cursor.0 as f32,
-                        self.cursor.1 as f32,
-                        size.width as f32,
-                        size.height as f32,
-                        n,
-                        dpi,
-                    );
-                    match row {
-                        Some(r) => {
-                            let act = overlay::items(&self.core, &self.env())[r].act;
-                            self.menu_act(act);
-                        }
-                        None => self.core.overlay.close(),
+                    let env = self.env();
+                    let (px, py) = (self.cursor.0 as f32, self.cursor.1 as f32);
+                    if let Some(cmd) = overlay::click(&mut self.core, &env, px, py, ww, wh) {
+                        self.desktop_cmd(cmd);
                     }
                     return;
                 }
@@ -313,18 +322,40 @@ impl App {
                     self.core.press(b);
                 } else if let Some(i) = icon_at(x, y) {
                     self.core.click_icon(i);
+                } else if on_lcd(x, y) {
+                    self.lcd_press = Some(self.cursor);
                 } else if !self.opts.windowed && on_device(x, y) {
                     if let Some(w) = self.window() {
                         let _ = w.drag_window();
                     }
                 }
             }
-            (MouseButton::Left, ElementState::Released) => {
+            (MouseButton::Left, false) => {
                 if let Some(b) = self.pressed.take() {
                     self.core.release(b);
                 }
+                if self.lcd_press.take().is_some() {
+                    self.core.tap(Button::B);
+                }
             }
             _ => {}
+        }
+    }
+
+    fn wheel(&mut self, delta: MouseScrollDelta) {
+        // positive = scrolled up, one unit per notch
+        self.wheel += match delta {
+            MouseScrollDelta::LineDelta(_, y) => y as f64,
+            MouseScrollDelta::PixelDelta(p) => p.y / 40.0,
+        };
+        while self.wheel.abs() >= 1.0 {
+            let up = self.wheel > 0.0;
+            self.wheel -= if up { 1.0 } else { -1.0 };
+            if self.core.overlay.is_open() {
+                overlay::scroll(&mut self.core, if up { -1 } else { 1 });
+            } else {
+                self.core.tap(Button::A);
+            }
         }
     }
 
@@ -345,7 +376,10 @@ impl App {
                 return;
             }
             if self.core.overlay.page == Page::Help {
-                self.core.overlay.page = Page::Menu;
+                match (named, ch.as_str()) {
+                    (Some(NamedKey::Escape), _) | (_, "c") => self.core.overlay.close(),
+                    _ => self.core.overlay.next_help(),
+                }
                 return;
             }
             let n = overlay::items(&self.core, &self.env()).len();
@@ -366,8 +400,7 @@ impl App {
         if down && !ev.repeat {
             match named {
                 Some(NamedKey::F1) => {
-                    self.core.overlay.open();
-                    self.core.overlay.page = Page::Help;
+                    self.core.overlay.open_help();
                     return;
                 }
                 Some(NamedKey::F2) => return self.core.cycle_speed(),
@@ -493,7 +526,13 @@ impl ApplicationHandler<UserEvent> for App {
                 if let Some(g) = &self.gfx {
                     g.resize(size.width, size.height);
                     if !self.opts.windowed {
-                        shape::apply(&g.window, size.width as f32 / VIEW.2);
+                        let panel = self
+                            .core
+                            .overlay
+                            .is_open()
+                            .then(|| overlay::panel(size.width as f32, size.height as f32).pixels());
+                        shape::apply(&g.window, size.width as f32 / VIEW.2, panel);
+                        self.shaped_panel = panel;
                     }
                     g.window.request_redraw();
                 }
@@ -504,24 +543,27 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x, position.y);
+                // a press on the LCD that turns into a drag moves the window instead of pressing B
+                if let Some((sx, sy)) = self.lcd_press {
+                    let (dx, dy) = (position.x - sx, position.y - sy);
+                    if !self.opts.windowed && dx * dx + dy * dy > 36.0 {
+                        self.lcd_press = None;
+                        if let Some(w) = self.window() {
+                            let _ = w.drag_window();
+                        }
+                    }
+                }
                 if self.core.overlay.page == Page::Menu {
-                    if let Some(w) = self.window() {
-                        let s = w.inner_size();
-                        let n = self.menu_rows();
-                        let row = overlay::row_at(
-                            position.x as f32,
-                            position.y as f32,
-                            s.width as f32,
-                            s.height as f32,
-                            n,
-                            w.scale_factor() as f32,
-                        );
+                    if let Some(s) = self.window().map(|w| w.inner_size()) {
+                        let row =
+                            overlay::row_at(position.x as f32, position.y as f32, s.width as f32, s.height as f32);
                         if row.is_some() {
                             self.core.overlay.hover = row;
                         }
                     }
                 }
             }
+            WindowEvent::MouseWheel { delta, .. } => self.wheel(delta),
             WindowEvent::MouseInput { state, button, .. } => self.mouse(state, button),
             WindowEvent::KeyboardInput { event, .. } => self.key(&event),
             WindowEvent::Focused(false) => {
@@ -530,6 +572,7 @@ impl ApplicationHandler<UserEvent> for App {
                     self.core.release(b);
                 }
                 self.pressed = None;
+                self.lcd_press = None;
             }
             _ => {}
         }

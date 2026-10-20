@@ -388,6 +388,10 @@ impl Screen for LinkScreen {
     fn name(&self) -> &'static str {
         "Link"
     }
+    /// Only the first menu; never mid-connection.
+    fn leavable(&self) -> bool {
+        self.state == State::Menu
+    }
 
     fn wants_text(&self) -> bool {
         self.state == State::IpEntry
