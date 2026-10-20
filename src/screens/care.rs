@@ -8,7 +8,7 @@ use crate::sim::{Discipline, Feed};
 use crate::sprite::Sprite;
 use crate::{Button, Tune};
 
-use super::{boxed, draw_hearts, msg, msg_owned, Ctx, DrawCx, ListView, Pick, Res, Screen, Tr};
+use super::{back, boxed, draw_hearts, msg, msg_owned, Ctx, DrawCx, ListView, Pick, Res, Screen, Tr};
 
 // ====================================================================== reactions
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -507,6 +507,12 @@ impl Screen for Status {
         self.t += dt;
         Tr::None
     }
+    fn prev(&mut self, cx: &mut Ctx) -> Option<Tr> {
+        cx.play(Tune::Click);
+        self.i = back(self.i, Status::pages(cx.game.pet.stage).len());
+        self.t = 0.0;
+        Some(Tr::None)
+    }
     fn press(&mut self, cx: &mut Ctx, b: Button) -> Tr {
         let n = Status::pages(cx.game.pet.stage).len();
         match b {
@@ -615,6 +621,11 @@ impl Screen for FoodMenu {
         self.view.t += dt;
         Tr::None
     }
+    fn prev(&mut self, cx: &mut Ctx) -> Option<Tr> {
+        cx.play(Tune::Click);
+        self.view.prev(3);
+        Some(Tr::None)
+    }
     fn press(&mut self, cx: &mut Ctx, b: Button) -> Tr {
         match b {
             Button::A => {
@@ -703,6 +714,11 @@ impl Screen for DisciplineMenu {
         self.view.t += dt;
         Tr::None
     }
+    fn prev(&mut self, cx: &mut Ctx) -> Option<Tr> {
+        cx.play(Tune::Click);
+        self.view.prev(2);
+        Some(Tr::None)
+    }
     fn press(&mut self, cx: &mut Ctx, b: Button) -> Tr {
         match b {
             Button::A => {
@@ -773,6 +789,11 @@ impl Screen for GameMenu {
     fn update(&mut self, _cx: &mut Ctx, dt: f64) -> Tr {
         self.view.t += dt;
         Tr::None
+    }
+    fn prev(&mut self, cx: &mut Ctx) -> Option<Tr> {
+        cx.play(Tune::Click);
+        self.view.prev(GameMenu::labels(cx.game.pet.job.is_some()).len());
+        Some(Tr::None)
     }
     fn press(&mut self, cx: &mut Ctx, b: Button) -> Tr {
         let labels = GameMenu::labels(cx.game.pet.job.is_some());

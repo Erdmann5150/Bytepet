@@ -12,7 +12,7 @@ use crate::{Button, Tune};
 
 use super::care::{item_used, react_then, ReactKind, Wedding};
 use super::{
-    boxed, draw_pick, msg, msg_owned, Confirm, Ctx, DrawCx, ListView, Message, Pick, Request, Res, Screen, Tr,
+    back, boxed, draw_pick, msg, msg_owned, Confirm, Ctx, DrawCx, ListView, Message, Pick, Request, Res, Screen, Tr,
 };
 
 enum Flow {
@@ -116,6 +116,11 @@ impl Screen for TownMenu {
     fn update(&mut self, _cx: &mut Ctx, dt: f64) -> Tr {
         self.view.t += dt;
         Tr::None
+    }
+    fn prev(&mut self, cx: &mut Ctx) -> Option<Tr> {
+        cx.play(Tune::Click);
+        self.view.prev(ITEMS.len());
+        Some(Tr::None)
     }
     fn press(&mut self, cx: &mut Ctx, b: Button) -> Tr {
         match b {
@@ -293,6 +298,12 @@ impl Screen for Shop {
         self.t += dt;
         Tr::None
     }
+    fn prev(&mut self, cx: &mut Ctx) -> Option<Tr> {
+        cx.play(Tune::Click);
+        self.i = back(self.i, cx.content.rules.item.len());
+        self.t = 0.0;
+        Some(Tr::None)
+    }
     fn press(&mut self, cx: &mut Ctx, b: Button) -> Tr {
         let c = cx.content;
         let n = c.rules.item.len();
@@ -347,6 +358,16 @@ impl Screen for Items {
     fn update(&mut self, _cx: &mut Ctx, dt: f64) -> Tr {
         self.t += dt;
         Tr::None
+    }
+    fn prev(&mut self, cx: &mut Ctx) -> Option<Tr> {
+        let n = cx.game.items.len();
+        if n == 0 {
+            return None;
+        }
+        cx.play(Tune::Click);
+        self.i = back(self.i, n);
+        self.t = 0.0;
+        Some(Tr::None)
     }
     fn press(&mut self, cx: &mut Ctx, b: Button) -> Tr {
         let ids: Vec<String> = cx.game.items.keys().cloned().collect();
@@ -403,6 +424,12 @@ impl Screen for Setup {
     fn update(&mut self, _cx: &mut Ctx, dt: f64) -> Tr {
         self.t += dt;
         Tr::None
+    }
+    fn prev(&mut self, cx: &mut Ctx) -> Option<Tr> {
+        cx.play(Tune::Click);
+        self.i = back(self.i, SETUP_ROWS.len());
+        self.t = 0.0;
+        Some(Tr::None)
     }
     fn press(&mut self, cx: &mut Ctx, b: Button) -> Tr {
         match b {

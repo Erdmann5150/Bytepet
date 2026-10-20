@@ -96,7 +96,7 @@ pub const HELP_PAGES: [(&str, &[&str]); 2] = [
             "OR AN ICON",
             "",
             "SCREEN   B",
-            "WHEEL    A",
+            "WHEEL  A/BACK",
             "R-CLICK  C",
             "",
             "AT HOME,",

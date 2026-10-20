@@ -11,7 +11,7 @@ use super::care::{
     POOP_POS,
 };
 use super::town::TownMenu;
-use super::{boxed, msg, Ctx, DrawCx, NameEntry, Res, Screen, Tr};
+use super::{back, boxed, msg, Ctx, DrawCx, NameEntry, Res, Screen, Tr};
 
 pub struct MainScreen {
     x: f64,
@@ -111,6 +111,12 @@ impl Screen for MainScreen {
         self.activate(cx, i)
     }
 
+    fn prev(&mut self, cx: &mut Ctx) -> Option<Tr> {
+        cx.play(Tune::Click);
+        // from no selection, back lands on the last icon
+        cx.ui.sel = back(cx.ui.sel.max(0) as usize, 9) as i32;
+        Some(Tr::None)
+    }
     fn press(&mut self, cx: &mut Ctx, b: Button) -> Tr {
         match b {
             Button::A => {

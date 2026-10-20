@@ -259,7 +259,24 @@ impl Core {
         }
     }
 
-    /// A quick press and release, for mouse clicks and the scroll wheel.
+    /// Scroll wheel: down is A (next), up moves the menu back one. Where there's no menu to
+    /// move back through (the mini-games), up is A too.
+    pub fn scroll(&mut self, up: bool) {
+        if up {
+            let mut moved = false;
+            self.with_top(|s, cx| {
+                let tr = s.prev(cx);
+                moved = tr.is_some();
+                tr.unwrap_or(Tr::None)
+            });
+            if moved {
+                return;
+            }
+        }
+        self.tap(Button::A);
+    }
+
+    /// A quick press and release, for mouse clicks.
     pub fn tap(&mut self, b: Button) {
         self.press(b);
         self.release(b);
