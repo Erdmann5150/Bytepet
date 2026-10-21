@@ -140,6 +140,61 @@ fn hero(dir: &Path) {
     out.save_png(dir.join("hero.png")).unwrap();
 }
 
+/// The README's "Make it yours" image: all twelve preset shells in order, each with a
+/// different pet, in two staggered rows, the back one tucked slightly behind the front.
+fn shells(dir: &Path) {
+    use bytepet::look::PRESETS;
+    // BERRY LIME OCEAN GRAPE ZEBRA FLAME / DONUT CAMO COSMIC SWEET MINT RETRO
+    let pets = [
+        (Stage::Child, "child_a"),
+        (Stage::Teen, "teen_h"),
+        (Stage::Adult, "g_a"),
+        (Stage::Adult, "s_m"),
+        (Stage::Adult, "h_b"),
+        (Stage::Adult, "p_a"),
+        (Stage::Baby, "baby"),
+        (Stage::Child, "child_b"),
+        (Stage::Adult, "s_h"),
+        (Stage::Adult, "g_b"),
+        (Stage::Teen, "teen_p"),
+        (Stage::Senior, "senior"),
+    ];
+    let scale = 0.53;
+    let devices: Vec<tiny_skia::Pixmap> = PRESETS
+        .iter()
+        .zip(pets)
+        .enumerate()
+        .map(|(i, (p, (stage, character)))| {
+            let mut r = Rig::new(stage, character);
+            r.core.game.settings.look = p.look;
+            if i % 4 == 3 {
+                r.core.game.pet.praise_t = 100.0; // a few of them dancing
+            }
+            r.frames(45 + 7 * i); // so they don't all stand the same way
+            r.core.shade = r.core.lcd.buf.map(|v| v as f32);
+            Renderer::new().render(&r.core, scale, 1.0, r.wall)
+        })
+        .collect();
+    let (dw, dh) = (devices[0].width(), devices[0].height());
+    let per_row = devices.len() / 2;
+    // a little closer than side by side, the second row half a step along and a little up
+    let step_x = dw * 92 / 100;
+    let step_y = dh * 93 / 100;
+    let w = step_x * (per_row as u32 - 1) + step_x / 2 + dw;
+    let h = step_y + dh;
+    let mut out = tiny_skia::Pixmap::new(w, h).unwrap();
+    // the second row first, so its antennas tuck behind the first row instead of covering
+    // its buttons
+    for (i, d) in devices.iter().enumerate().rev() {
+        let (row, col) = (i / per_row, (i % per_row) as u32);
+        let x = col * step_x + row as u32 * step_x / 2;
+        let y = row as u32 * step_y;
+        let paint = tiny_skia::PixmapPaint::default();
+        out.draw_pixmap(x as i32, y as i32, d.as_ref(), &paint, tiny_skia::Transform::identity(), None);
+    }
+    out.save_png(dir.join("shells.png")).unwrap();
+}
+
 fn main() {
     let dir = PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| "art".into()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -179,6 +234,7 @@ fn main() {
     title.save_png(dir.join("title.png")).unwrap();
 
     hero(&dir);
+    shells(&dir);
 
     // devices: every shell, and the three common sizes
     let mut r = Rig::new(Stage::Adult, "g_b");
