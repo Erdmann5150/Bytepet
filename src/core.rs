@@ -26,6 +26,11 @@ pub const SHAKE_SECS: f64 = 0.6;
 pub const SHAKE_REACH: f64 = 2.0;
 /// How many times a second it shakes back and forth.
 const SHAKE_HZ: f64 = 11.0;
+/// How fast LCD dots fade toward their target, per second: about 100 ms of visible fade.
+const FADE_RATE: f32 = 30.0;
+/// A dot this close to its target settles there. The last steps of the fade are too faint to
+/// see but would each cost a redraw, and the desktop shell redraws only while something moves.
+const FADE_SNAP: f32 = 1.0 / 64.0;
 
 pub struct Core {
     pub content: Content,
@@ -433,12 +438,12 @@ impl Core {
         }
         self.idle_out(dt);
         self.render_lcd();
-        let k = 1.0 - (-dt as f32 * 18.0).exp();
+        let k = 1.0 - (-dt as f32 * FADE_RATE).exp();
         for (sh, &v) in self.shade.iter_mut().zip(self.lcd.buf.iter()) {
             *sh += (v as f32 - *sh) * k;
             // settle exactly once the difference can't be seen, so a still screen stays still
             // (and the desktop shell can skip redrawing it)
-            if (v as f32 - *sh).abs() < 1.0 / 512.0 {
+            if (v as f32 - *sh).abs() < FADE_SNAP {
                 *sh = v as f32;
             }
         }
