@@ -195,16 +195,17 @@ impl Pet {
             self.name.clone()
         }
     }
-    /// Something is waiting to be done for the pet: a call, poop to clean up, a sickness, an
-    /// empty heart, or the lights left on while it sleeps. The alert icon shows it. Hearts
-    /// can't be filled while it sleeps, so they don't count then.
+    /// Something is waiting to be done for the pet: a call, poop to clean up, a sickness or an
+    /// empty heart. The alert icon shows it. Hearts can't be filled while it sleeps, so they
+    /// don't count then. The lights only matter while the pet is calling about them, as it
+    /// falls asleep: once that call is answered or has timed out, lights left on are no
+    /// longer a need.
     pub fn needs_attention(&self) -> bool {
         if !self.alive() {
             return false;
         }
         let hearts = !self.asleep && (self.hunger == 0 || self.happy == 0);
-        let lights = self.asleep && self.lights;
-        self.call.is_some() || self.poop > 0 || self.sick || hearts || lights
+        self.call.is_some() || self.poop > 0 || self.sick || hearts
     }
     pub fn top_skill_value(&self) -> u32 {
         Skill::ALL.iter().map(|&s| self.skills.get(s)).max().unwrap_or(0)

@@ -97,7 +97,8 @@ with the attention icon and a beep, and a call left for 15 minutes counts as a c
 Clean up poop, give medicine when the skull appears (some illnesses need two doses), and
 turn the lights off once it falls asleep, or that's a care mistake too. A pet left sick or
 starving for too long goes back to its home planet. The attention icon stays lit while
-anything is waiting: a call, poop, a sickness, an empty heart, or the lights left on.
+anything is waiting: a call (falling asleep with the lights on is one), poop, a sickness or
+an empty heart.
 
 **📏 Discipline.** Sometimes your pet calls when nothing is wrong, or refuses food: SCOLD it.
 Sometimes it shows off with a little dance: PRAISE it. Getting these right fills the

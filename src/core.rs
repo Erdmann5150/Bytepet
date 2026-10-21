@@ -11,7 +11,7 @@ use crate::overlay::Overlay;
 use crate::rng::Pcg32;
 use crate::save;
 use crate::screens::{Ctx, DrawCx, Key, MainScreen, Message, Res, Screen, Tr, UiState};
-use crate::sim::{Event, Game};
+use crate::sim::{CallReason, Event, Game};
 use crate::{Button, Tune};
 
 pub const SAVE_EVERY: f64 = 20.0;
@@ -546,11 +546,11 @@ impl Core {
         if p.sick {
             needs.push("medicine");
         }
-        if p.asleep && p.lights {
-            needs.push("lights off");
-        }
-        if matches!(&p.call, Some(c) if c.reason == crate::sim::CallReason::Fake) {
-            needs.push("discipline");
+        // only while it's calling about them, like the alert icon (see `Pet::needs_attention`)
+        match p.call.as_ref().map(|c| c.reason) {
+            Some(CallReason::Lights) => needs.push("lights off"),
+            Some(CallReason::Fake) => needs.push("discipline"),
+            _ => {}
         }
         let tail = match (needs.is_empty(), p.asleep) {
             (false, _) => format!("Needs {}", needs.join(", ")),
