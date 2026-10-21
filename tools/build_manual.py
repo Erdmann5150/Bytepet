@@ -608,8 +608,8 @@ story += [KeepTogether([
       "see each part change as you go. Once you've changed anything, the shell reads <b>CUSTOM</b>. "
       "Right-click or <b>C</b> goes back a page."),
     Spacer(1, 4), img("customs", CW),
-    P("Six designs of your own. Between them they use every antenna (including none), every button shape, all "
-      "three corner styles and all five LCD colours.", "cap")]),
+    P("Six designs of your own. Between them they use every antenna (including none) on either side, every button "
+      "shape, all three corner styles and all five LCD colours.", "cap")]),
     # free to run on to the next page (its header repeats), so it never leaves a gap behind
     Spacer(1, 6), custom]
 
