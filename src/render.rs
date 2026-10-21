@@ -1,6 +1,6 @@
 //! Draws the device with tiny-skia into a transparent RGBA pixmap (premultiplied alpha).
-//! The static shell is cached per (look, size); buttons, icons, the LCD and the settings
-//! menu are drawn every frame.
+//! The static shell is cached per (look, size); buttons, icons and the LCD (or the settings,
+//! which take over the LCD while open) are drawn every frame.
 
 use tiny_skia::{
     Color, FillRule, GradientStop, LineCap, Mask, Paint, Path, PathBuilder, Pixmap, Point, RadialGradient, Rect,
@@ -12,7 +12,7 @@ use crate::font::{for_each_dot, text_width};
 use crate::layout::*;
 use crate::lcd::{Lcd, H as LH, W as LW};
 use crate::look::{Antenna, ButtonShape, Corners, Look, Part, Pattern};
-use crate::overlay::{self, Env, Page};
+use crate::overlay::{self, Page, GRID_H, GRID_W};
 use crate::rng::Pcg32;
 use crate::sprite::Sprite;
 
@@ -107,18 +107,13 @@ impl Renderer {
         Renderer::default()
     }
 
-    /// Render the whole widget. `scale` is window pixels per design unit (size setting × DPI);
-    /// `env` is needed only while the menu is open. The menu sizes itself to the window, so
-    /// `_dpi` is no longer used; it stays so callers don't change.
-    pub fn render(&mut self, core: &Core, scale: f32, _dpi: f32, env: Option<&Env>, wall: f64) -> Pixmap {
+    /// Render the whole widget. `scale` is window pixels per design unit (size setting × DPI).
+    /// The settings size themselves from `scale`, so `_dpi` is no longer used; it stays so
+    /// callers don't change.
+    pub fn render(&mut self, core: &Core, scale: f32, _dpi: f32, wall: f64) -> Pixmap {
         let (w, h) = window_size(scale);
         let mut pm = self.shell(&core.game.settings.look, w.max(1), h.max(1), scale).clone();
         self.dynamic(&mut pm, core, scale, wall);
-        if core.overlay.is_open() {
-            if let Some(env) = env {
-                draw_overlay(&mut pm, core, env);
-            }
-        }
         pm
     }
 
@@ -168,30 +163,72 @@ impl Renderer {
             };
             draw_sprite(pm, icon, rx, ry, ICON_SCALE, rgba(c, 255), ts);
         }
-        // LCD dots, aligned to whole pixels so they stay crisp at any size
-        let (_, lcd_off, lcd_on) = look.lcd.colors();
-        let (lx, ly) = LCD_POS;
-        let cell_px = CELL * scale;
-        let gap = if cell_px >= 4.0 { (scale).clamp(0.5, 1.5) } else { 0.0 };
-        let ox = (lx - VIEW.0) * scale;
-        let oy = (ly - VIEW.1) * scale;
-        for y in 0..LH {
-            for x in 0..LW {
-                let v = core.shade[(y * LW + x) as usize].clamp(0.0, 1.0);
-                let c = [0, 1, 2].map(|k| (lcd_off[k] as f32 + (lcd_on[k] as f32 - lcd_off[k] as f32) * v) as u8);
-                let x0 = (ox + x as f32 * cell_px).round();
-                let y0 = (oy + y as f32 * cell_px).round();
-                let x1 = (ox + (x + 1) as f32 * cell_px).round() - gap;
-                let y1 = (oy + (y + 1) as f32 * cell_px).round() - gap;
-                if let Some(r) = Rect::from_ltrb(x0, y0, x1.max(x0 + 1.0), y1.max(y0 + 1.0)) {
-                    pm.fill_rect(r, &paint(rgba(c, 255)), Transform::identity(), None);
-                }
-            }
+        if core.overlay.is_open() {
+            draw_settings(pm, core, scale);
+        } else {
+            draw_lcd(pm, core, scale);
         }
         draw_status(pm, core, scale);
         if core.wants_text() {
             let y = FACE.1 + FACE.3 + 30.0;
             ptext(pm, "TYPE ON KEYBOARD", CX, y, 2.0, Color::WHITE, true, ts);
+        }
+    }
+}
+
+/// The LCD's dots, aligned to whole pixels so they stay crisp at any size.
+fn draw_lcd(pm: &mut Pixmap, core: &Core, scale: f32) {
+    let look = &core.game.settings.look;
+    let (_, lcd_off, lcd_on) = look.lcd.colors();
+    let (lx, ly) = LCD_POS;
+    let cell_px = CELL * scale;
+    let gap = if cell_px >= 4.0 { (scale).clamp(0.5, 1.5) } else { 0.0 };
+    let ox = (lx - VIEW.0) * scale;
+    let oy = (ly - VIEW.1) * scale;
+    for y in 0..LH {
+        for x in 0..LW {
+            let v = core.shade[(y * LW + x) as usize].clamp(0.0, 1.0);
+            let c = [0, 1, 2].map(|k| (lcd_off[k] as f32 + (lcd_on[k] as f32 - lcd_off[k] as f32) * v) as u8);
+            let x0 = (ox + x as f32 * cell_px).round();
+            let y0 = (oy + y as f32 * cell_px).round();
+            let x1 = (ox + (x + 1) as f32 * cell_px).round() - gap;
+            let y1 = (oy + (y + 1) as f32 * cell_px).round() - gap;
+            if let Some(r) = Rect::from_ltrb(x0, y0, x1.max(x0 + 1.0), y1.max(y0 + 1.0)) {
+                pm.fill_rect(r, &paint(rgba(c, 255)), Transform::identity(), None);
+            }
+        }
+    }
+}
+
+/// The settings, on the LCD at twice its resolution and in its colours. On the smallest
+/// devices the grid is bigger than the LCD, so the glass (in its frame) grows to hold it.
+fn draw_settings(pm: &mut Pixmap, core: &Core, scale: f32) {
+    let look = &core.game.settings.look;
+    let (glass, off, on) = look.lcd.colors();
+    let g = overlay::grid(scale);
+    let id = Transform::identity();
+    let (lx, ly) = ((LCD_POS.0 - VIEW.0) * scale, (LCD_POS.1 - VIEW.1) * scale);
+    let (lw, lh) = (LW as f32 * CELL * scale, LH as f32 * CELL * scale);
+    if g.w() > lw + 1.0 || g.h() > lh + 1.0 {
+        let pad = |k: f32| {
+            rounded(g.x - k * g.dot, g.y - k * g.dot, g.w() + 2.0 * k * g.dot, g.h() + 2.0 * k * g.dot, k * g.dot)
+        };
+        fill(pm, pad(2.5), rgba(look.frame, 255), id, None);
+        fill(pm, pad(1.0), rgba(glass, 255), id, None);
+    } else {
+        // the LCD's own dots would show at the edges round these finer ones
+        fill(pm, Rect::from_xywh(lx, ly, lw, lh).map(PathBuilder::from_rect), rgba(glass, 255), id, None);
+    }
+    // solid, with no gaps between the dots: gaps break the small letters up at large sizes
+    let (off, on) = (paint(rgba(off, 255)), paint(rgba(on, 255)));
+    let dots = overlay::dots(core);
+    for y in 0..GRID_H {
+        for x in 0..GRID_W {
+            let (x0, y0, x1, y1) = g.edges(x, y);
+            let p = if dots[(y * GRID_W + x) as usize] { &on } else { &off };
+            if let Some(r) = Rect::from_ltrb(x0, y0, x1.max(x0 + 1.0), y1.max(y0 + 1.0)) {
+                pm.fill_rect(r, p, id, None);
+            }
         }
     }
 }
@@ -419,50 +456,6 @@ fn paint_pattern(pm: &mut Pixmap, look: &Look, ts: Transform, mask: &Mask) {
                     let tilt = if (row + col) % 2 == 0 { -0.3 } else { 0.3 };
                     fill(pm, poly(&heart_points(x, 40.0 + row as f32 * 58.0, 13.0, tilt)), accent, ts, mask);
                 }
-            }
-        }
-    }
-}
-
-fn draw_overlay(pm: &mut Pixmap, core: &Core, env: &Env) {
-    let p = core.overlay.panel(pm.width() as f32, pm.height() as f32);
-    let id = Transform::identity();
-    let pink = Color::from_rgba8(255, 140, 200, 255);
-    let white = Color::from_rgba8(238, 238, 244, 255);
-    let dim = Color::from_rgba8(150, 152, 170, 255);
-    let fs = p.fs;
-    let row_text_y = |i: usize| p.top + i as f32 * p.row_h + fs;
-    if !core.overlay.is_open() {
-        return;
-    }
-    let title = core.overlay.title();
-    fill(pm, rounded(p.x, p.y, p.w, p.h, 3.0 * fs), Color::from_rgba8(24, 26, 36, 240), id, None);
-    ptext(pm, title, p.x + 3.0 * fs, p.y + 2.0 * fs, fs, pink, false, id);
-    match core.overlay.page {
-        Page::Closed => {}
-        Page::Menu | Page::Shell | Page::Part(_) => {
-            for (i, it) in overlay::items(core, env).iter().enumerate() {
-                if core.overlay.hover == Some(i) {
-                    fill(
-                        pm,
-                        Rect::from_xywh(p.x + fs, p.top + i as f32 * p.row_h, p.w - 2.0 * fs, p.row_h)
-                            .map(PathBuilder::from_rect),
-                        Color::from_rgba8(236, 72, 153, 200),
-                        id,
-                        None,
-                    );
-                }
-                ptext(pm, it.label, p.x + 3.0 * fs, row_text_y(i), fs, white, false, id);
-                if !it.value.is_empty() {
-                    let vx = p.x + p.w - 3.0 * fs - text_width(&it.value) as f32 * fs;
-                    ptext(pm, &it.value, vx, row_text_y(i), fs, dim, false, id);
-                }
-            }
-        }
-        Page::Help => {
-            let (_, lines) = overlay::HELP_PAGES[core.overlay.help.min(overlay::HELP_PAGES.len() - 1)];
-            for (i, l) in lines.iter().enumerate() {
-                ptext(pm, l, p.x + 3.0 * fs, row_text_y(i), fs, white, false, id);
             }
         }
     }

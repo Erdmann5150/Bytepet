@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use bytepet::content::{Content, Pose, Stage};
 use bytepet::core::Core;
 use bytepet::games::{self, GameHost, SoloGame, VersusGame};
-use bytepet::overlay::{Env, Page};
+use bytepet::overlay::Page;
 use bytepet::render::{lcd_pixmap, sprite_pixmap, Renderer};
 use bytepet::rng::Pcg32;
 use bytepet::screens::{boxed, care, town, Screen};
@@ -58,8 +58,7 @@ impl Rig {
     fn device(&mut self, dir: &Path, name: &str, scale: f32) {
         // settle the LCD "ghosting" so screenshots are crisp
         self.core.shade = self.core.lcd.buf.map(|v| v as f32);
-        let env = Env { login: false, hide_label: "HIDE TO TRAY" };
-        let pm = Renderer::new().render(&self.core, scale, 1.0, Some(&env), self.wall);
+        let pm = Renderer::new().render(&self.core, scale, 1.0, self.wall);
         pm.save_png(dir.join(format!("{name}.png"))).unwrap();
     }
 }
@@ -135,6 +134,8 @@ fn main() {
         r.core.game.settings.set_shell(0);
         r.device(&dir, &format!("size_{name}"), s);
     }
+    // the settings, on the device's screen
+    r.core.overlay.env.hide_label = "HIDE TO TRAY";
     r.core.overlay.open();
     r.core.overlay.hover = Some(1);
     r.device(&dir, "menu_open", 0.75);
@@ -153,7 +154,7 @@ fn main() {
     r.device(&dir, "help_small", 0.40);
     r.core.overlay.next_help();
     r.device(&dir, "help2_small", 0.40);
-    r.core.overlay.page = Page::Help;
+    r.core.overlay.close();
 
     // LCD screens
     let mut r = Rig::new(Stage::Child, "child_a");

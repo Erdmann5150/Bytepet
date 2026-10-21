@@ -1,12 +1,18 @@
-//! The right-click settings menu, drawn inside the widget (so it works the same on every OS,
-//! with no native menu toolkit). Items that only the desktop shell can carry out are returned
-//! as `DesktopCmd`s.
+//! The settings, shown on the device's own screen. While they're open the LCD switches to twice
+//! its resolution (a [`GRID_W`]x[`GRID_H`] dot grid) and shows a page of rows, in the screen's
+//! own colours, so the rest of the device stays in sight while you change it. The device's
+//! buttons work it: A moves to the next row, B changes or opens it, C goes back. Items that only
+//! the desktop shell can carry out are returned as `DesktopCmd`s.
 //!
 //! The SHELL row opens a page of its own: a preset, then one page per part of the device
-//! (body, buttons, antenna, screen) where each setting steps through its options.
+//! (body, buttons, antenna, screen, icons) where each setting steps through its options.
 
 use crate::core::Core;
+use crate::font::{for_each_dot, text_width};
+use crate::layout::{CELL, LCD_POS, VIEW};
 use crate::look::{Field, Look, Part};
+use crate::screens::town::SPEEDS;
+use crate::{Button, Tune};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Page {
@@ -25,6 +31,10 @@ pub struct Overlay {
     pub hover: Option<usize>,
     /// Which of [`HELP_PAGES`] is showing.
     pub help: usize,
+    /// Facts about the desktop; the desktop shell keeps them up to date.
+    pub env: Env,
+    /// Commands from button presses (see `Core::press`) for the desktop shell to carry out.
+    cmds: Vec<DesktopCmd>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,6 +79,12 @@ pub struct Env {
     pub hide_label: &'static str,
 }
 
+impl Default for Env {
+    fn default() -> Self {
+        Env { login: false, hide_label: "MINIMIZE" }
+    }
+}
+
 pub struct Item {
     pub label: &'static str,
     pub value: String,
@@ -81,8 +97,9 @@ pub fn size_name(scale: f32) -> &'static str {
     SIZES.iter().min_by(|a, b| (a.1 - scale).abs().total_cmp(&(b.1 - scale).abs())).map(|s| s.0).unwrap_or("MEDIUM")
 }
 
-pub fn items(core: &Core, env: &Env) -> Vec<Item> {
+pub fn items(core: &Core) -> Vec<Item> {
     let s = &core.game.settings;
+    let env = &core.overlay.env;
     let back = Item { label: "BACK", value: String::new(), act: Act::Back };
     match core.overlay.page {
         Page::Shell => {
@@ -112,41 +129,20 @@ pub fn items(core: &Core, env: &Env) -> Vec<Item> {
         Item { label: "ON TOP", value: onoff(s.ui.on_top), act: Act::OnTop },
         Item { label: "NOTIFY", value: onoff(s.ui.notify), act: Act::Notify },
         Item { label: "AT LOGIN", value: onoff(env.login), act: Act::Login },
-        Item { label: "HELP", value: String::new(), act: Act::Help },
+        Item { label: "HELP", value: ">".into(), act: Act::Help },
         Item { label: env.hide_label, value: String::new(), act: Act::Hide },
         Item { label: "QUIT", value: String::new(), act: Act::Quit },
         Item { label: "CLOSE", value: String::new(), act: Act::Close },
     ]
 }
 
-/// The help pages: a title and up to [`ROWS`] lines of at most [`COLS`] characters.
-pub const HELP_PAGES: [(&str, &[&str]); 2] = [
-    (
-        "KEYS 1/2",
-        &["A  Z  LEFT", "B  X  ENTER", "C  C  RIGHT", "", "M/A+C  MUTE", "F1  HELP", "F2  SPEED", "F3  SHELL"],
-    ),
-    (
-        "MOUSE 2/2",
-        &[
-            "CLICK ABC",
-            "OR AN ICON",
-            "",
-            "SCREEN   B",
-            "WHEEL  A/BACK",
-            "R-CLICK  C",
-            "",
-            "AT HOME,",
-            "R-CLICK  MENU",
-            "",
-            "DRAG TO MOVE",
-        ],
-    ),
+/// The help pages: a title and up to [`VISIBLE`] lines.
+pub const HELP_PAGES: [(&str, &[&str]); 4] = [
+    ("KEYS 1/4", &["A  Z  LEFT", "B  X  ENTER", "C  C  RIGHT", "A+C/M  MUTE"]),
+    ("KEYS 2/4", &["F1  HELP", "F2  SPEED", "F3  SHELL"]),
+    ("MOUSE 3/4", &["CLICK ABC OR", "AN ICON", "SCREEN   B", "WHEEL  A/BACK"]),
+    ("MOUSE 4/4", &["R-CLICK  C", "AT HOME, IT", "OPENS SETTINGS", "DRAG TO MOVE"]),
 ];
-
-/// Characters per line: the longest label, two spaces and its value must fit.
-pub const COLS: usize = 15;
-/// Lines per page: the menu's items. Help pages use the same panel.
-pub const ROWS: usize = 11;
 
 impl Overlay {
     pub fn open(&mut self) {
@@ -195,34 +191,41 @@ impl Overlay {
     /// How many rows the page has.
     pub fn rows(&self) -> usize {
         match self.page {
-            Page::Menu => ROWS,
+            Page::Menu => 11,
             Page::Shell => Part::ALL.len() + 3,
             Page::Part(p) => p.fields().len() + 1,
             Page::Help | Page::Closed => 0,
         }
     }
-    /// The panel's title.
+    /// The page's title.
     pub fn title(&self) -> &'static str {
         match self.page {
-            Page::Closed | Page::Menu => "BYTEPET",
+            Page::Closed | Page::Menu => "SETTINGS",
             Page::Help => HELP_PAGES[self.help.min(HELP_PAGES.len() - 1)].0,
             Page::Shell => "SHELL",
             Page::Part(p) => p.name(),
         }
     }
+    /// The first row on screen: rows show [`VISIBLE`] at a time, a screenful per step.
+    pub fn first_row(&self) -> usize {
+        self.hover.unwrap_or(0) / VISIBLE * VISIBLE
+    }
+    /// Commands from button presses since the last call.
+    pub fn take_cmds(&mut self) -> Vec<DesktopCmd> {
+        std::mem::take(&mut self.cmds)
+    }
+    pub(crate) fn push_cmd(&mut self, cmd: DesktopCmd) {
+        self.cmds.push(cmd);
+    }
 }
 
 /// Carry out a menu choice. Settings stored in the game are changed here; the rest is
 /// returned for the desktop shell.
-pub fn activate(core: &mut Core, env: &Env, act: Act) -> Option<DesktopCmd> {
+pub fn activate(core: &mut Core, act: Act) -> Option<DesktopCmd> {
+    let login = core.overlay.env.login;
     let s = &mut core.game.settings;
     match act {
-        Act::Size => {
-            let i = SIZES.iter().position(|x| x.0 == size_name(s.ui.scale)).unwrap_or(1);
-            let next = SIZES[(i + 1) % SIZES.len()].1;
-            s.ui.scale = next;
-            return Some(DesktopCmd::SetScale(next));
-        }
+        Act::Size => return Some(step_size(core, 1)),
         Act::Shell => core.overlay.go(Page::Shell, 0),
         Act::Preset => s.next_shell(),
         Act::Part(p) => core.overlay.go(Page::Part(p), 0),
@@ -242,7 +245,7 @@ pub fn activate(core: &mut Core, env: &Env, act: Act) -> Option<DesktopCmd> {
             return Some(DesktopCmd::SetOnTop(s.ui.on_top));
         }
         Act::Notify => s.ui.notify = !s.ui.notify,
-        Act::Login => return Some(DesktopCmd::SetLogin(!env.login)),
+        Act::Login => return Some(DesktopCmd::SetLogin(!login)),
         Act::Help => core.overlay.open_help(),
         Act::Hide => {
             core.overlay.close();
@@ -254,11 +257,19 @@ pub fn activate(core: &mut Core, env: &Env, act: Act) -> Option<DesktopCmd> {
     None
 }
 
-/// Left and right on the keyboard: step the highlighted setting back or forward. Rows that
-/// aren't a setting with options ignore it.
-pub fn adjust(core: &mut Core, env: &Env, dir: i32) {
-    let Some(hover) = core.overlay.hover else { return };
-    let Some(act) = items(core, env).get(hover).map(|it| it.act) else { return };
+fn step_size(core: &mut Core, dir: i32) -> DesktopCmd {
+    let s = &mut core.game.settings;
+    let i = SIZES.iter().position(|x| x.0 == size_name(s.ui.scale)).unwrap_or(1) as i32;
+    let next = SIZES[(i + dir).rem_euclid(SIZES.len() as i32) as usize].1;
+    s.ui.scale = next;
+    DesktopCmd::SetScale(next)
+}
+
+/// Left and right on the keyboard: step the highlighted setting back or forward. On/off
+/// settings flip either way; rows that open a page or do something ignore it.
+pub fn adjust(core: &mut Core, dir: i32) -> Option<DesktopCmd> {
+    let hover = core.overlay.hover?;
+    let act = items(core).get(hover)?.act;
     let s = &mut core.game.settings;
     match act {
         Act::Field(f) => s.look.step(f, dir),
@@ -266,145 +277,44 @@ pub fn adjust(core: &mut Core, env: &Env, dir: i32) {
             let n = crate::look::PRESETS.len() as i32;
             s.set_shell((s.shell as i32 + dir).rem_euclid(n) as u32);
         }
+        Act::Size => return Some(step_size(core, dir)),
+        Act::Speed => {
+            let k = SPEEDS.iter().position(|&x| x == s.speed).unwrap_or(0) as i32;
+            s.speed = SPEEDS[(k + dir).rem_euclid(SPEEDS.len() as i32) as usize];
+        }
+        Act::Sound | Act::OnTop | Act::Notify | Act::Login => return activate(core, act),
         _ => {}
-    }
-}
-
-/// A setting picked by value, as the tray menu offers them (the menu above steps through values).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Choice {
-    /// An index into [`SIZES`].
-    Size(usize),
-    /// A preset look.
-    Shell(u32),
-    /// One option of one part of the look.
-    Look(Field, usize),
-    Speed(u32),
-    /// `None` is off, otherwise a volume in percent.
-    Sound(Option<u32>),
-    OnTop(bool),
-    Notify(bool),
-    Login(bool),
-}
-
-/// Apply a [`Choice`]. Like [`activate`], what only the desktop shell can do is returned.
-pub fn choose(core: &mut Core, c: Choice) -> Option<DesktopCmd> {
-    let s = &mut core.game.settings;
-    match c {
-        Choice::Size(i) => {
-            let scale = SIZES[i.min(SIZES.len() - 1)].1;
-            s.ui.scale = scale;
-            return Some(DesktopCmd::SetScale(scale));
-        }
-        Choice::Shell(i) => s.set_shell(i),
-        Choice::Look(f, i) => s.look.set(f, i),
-        Choice::Speed(x) => s.speed = x,
-        Choice::Sound(v) => core.set_sound(v),
-        Choice::OnTop(on) => {
-            s.ui.on_top = on;
-            return Some(DesktopCmd::SetOnTop(on));
-        }
-        Choice::Notify(on) => s.ui.notify = on,
-        Choice::Login(on) => return Some(DesktopCmd::SetLogin(on)),
     }
     None
 }
 
-/// Where the menu panel sits, in window pixels. Text is drawn in whole-pixel dots of size
-/// `fs`, the largest that lets the panel fill most of the window, so the menu grows and
-/// shrinks with the device and stays crisp.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Panel {
-    pub x: f32,
-    pub y: f32,
-    pub w: f32,
-    pub h: f32,
-    /// Pixels per font dot.
-    pub fs: f32,
-    pub row_h: f32,
-    /// Top of the first row (below the title).
-    pub top: f32,
-}
-
-/// Font dots: 1.5 padding, a 7-dot title row, ROWS rows of 7 dots, 1.5 padding.
-const ROW_DOTS: f32 = 7.0;
-const PANEL_W_DOTS: f32 = (COLS * 4 - 1) as f32 + 6.0;
-const PANEL_H_DOTS: f32 = (ROWS + 1) as f32 * ROW_DOTS + 3.0;
-/// Share of the window the panel may cover.
-const FILL: f32 = 0.92;
-
-pub fn panel(win_w: f32, win_h: f32) -> Panel {
-    let fs = (win_w * FILL / PANEL_W_DOTS).min(win_h * FILL / PANEL_H_DOTS).floor().max(1.0);
-    let (w, h) = (PANEL_W_DOTS * fs, PANEL_H_DOTS * fs);
-    let x = ((win_w - w) / 2.0).round().max(0.0);
-    let y = ((win_h - h) / 2.0).round().max(0.0);
-    let row_h = ROW_DOTS * fs;
-    Panel { x, y, w, h, fs, row_h, top: y + 1.5 * fs + row_h }
-}
-
-impl Panel {
-    pub fn contains(&self, px: f32, py: f32) -> bool {
-        px >= self.x && px < self.x + self.w && py >= self.y && py < self.y + self.h
-    }
-    /// The panel as whole pixels (x, y, w, h), for the window's click-through shape.
-    pub fn pixels(&self) -> (i32, i32, i32, i32) {
-        (self.x.floor() as i32, self.y.floor() as i32, self.w.ceil() as i32 + 1, self.h.ceil() as i32 + 1)
-    }
-}
-
-impl Overlay {
-    /// Where this page's panel sits. The menu and help fill most of the window; the SHELL
-    /// pages are only as tall as their rows and keep to the top or bottom, away from the part
-    /// being changed, so you can watch it change.
-    pub fn panel(&self, win_w: f32, win_h: f32) -> Panel {
-        let full = panel(win_w, win_h);
-        let at_bottom = match self.page {
-            // the icons' panel covers the top row and leaves the bottom row, with the alert icon
-            // and the name, in sight
-            Page::Shell | Page::Part(Part::Body | Part::Buttons | Part::Icons) => false,
-            Page::Part(Part::Antenna | Part::Screen) => true,
-            Page::Closed | Page::Menu | Page::Help => return full,
-        };
-        let h = ((self.rows() + 1) as f32 * ROW_DOTS + 3.0) * full.fs;
-        let y = if at_bottom { win_h - h - full.y } else { full.y }.round().max(0.0);
-        Panel { y, h, top: y + 1.5 * full.fs + full.row_h, ..full }
-    }
-}
-
-/// Which row of the open page is under a window-pixel position.
-pub fn row_at(o: &Overlay, px: f32, py: f32, win_w: f32, win_h: f32) -> Option<usize> {
-    let p = o.panel(win_w, win_h);
-    if !p.contains(px, py) || py < p.top {
-        return None;
-    }
-    let r = ((py - p.top) / p.row_h) as usize;
-    (r < o.rows()).then_some(r)
-}
-
-/// A left click at a window-pixel position while the menu is open. A click on a row chooses
-/// it, a click on a help page turns the page, and a click outside the panel closes the menu.
-pub fn click(core: &mut Core, env: &Env, px: f32, py: f32, win_w: f32, win_h: f32) -> Option<DesktopCmd> {
-    match core.overlay.page {
-        Page::Closed => None,
-        Page::Help => {
-            if core.overlay.panel(win_w, win_h).contains(px, py) {
-                core.overlay.next_help();
-            } else {
-                core.overlay.close();
-            }
+/// A press of one of the device's buttons while the settings are open: A is the next row,
+/// B changes or opens it, C goes back a page (and closes the settings from the top).
+pub fn button(core: &mut Core, b: Button) -> Option<DesktopCmd> {
+    match (core.overlay.page, b) {
+        (Page::Closed, _) => None,
+        (_, Button::C) => {
+            core.play(Tune::Click);
+            core.overlay.back();
             None
         }
-        Page::Menu | Page::Shell | Page::Part(_) => {
-            if let Some(r) = row_at(&core.overlay, px, py, win_w, win_h) {
-                core.overlay.hover = Some(r);
-                let act = items(core, env)[r].act;
-                activate(core, env, act)
-            } else {
-                if !core.overlay.panel(win_w, win_h).contains(px, py) {
-                    core.overlay.close();
-                }
-                None
+        (Page::Help, _) => {
+            core.play(Tune::Click);
+            core.overlay.next_help();
+            None
+        }
+        (_, Button::A) => {
+            core.play(Tune::Click);
+            scroll(core, 1);
+            None
+        }
+        (_, Button::B) => {
+            let act = items(core).get(core.overlay.hover.unwrap_or(0))?.act;
+            // the sound row beeps at its new volume by itself
+            if act != Act::Sound {
+                core.play(Tune::Ok);
             }
+            activate(core, act)
         }
     }
 }
@@ -418,57 +328,179 @@ pub fn scroll(core: &mut Core, steps: i32) {
     }
 }
 
+// ====================================================================== on the screen
+/// The settings screen's size in dots: the LCD's, doubled.
+pub const GRID_W: i32 = crate::lcd::W * 2;
+pub const GRID_H: i32 = crate::lcd::H * 2;
+/// Rows on screen at once, under the title.
+pub const VISIBLE: usize = 4;
+/// Dots from one row to the next, and where the first row's highlight starts.
+const ROW_DOTS: i32 = 6;
+const FIRST_ROW: i32 = 7;
+/// The smallest dot, in window pixels, that keeps the letters readable. On the smallest
+/// devices the grid grows past the LCD (over its frame) to keep to it.
+pub const MIN_DOT: f32 = 2.0;
+
+/// Where the settings screen's dots sit, in window pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Grid {
+    pub x: f32,
+    pub y: f32,
+    /// Pixels per dot.
+    pub dot: f32,
+}
+
+/// The grid for a window of `scale` pixels per design unit: normally exactly over the LCD's
+/// dots, two to each of them, centred on the LCD when it has to grow.
+pub fn grid(scale: f32) -> Grid {
+    let dot = (CELL / 2.0 * scale).max(MIN_DOT);
+    let cx = (LCD_POS.0 + crate::lcd::W as f32 * CELL / 2.0 - VIEW.0) * scale;
+    let cy = (LCD_POS.1 + crate::lcd::H as f32 * CELL / 2.0 - VIEW.1) * scale;
+    Grid { x: (cx - GRID_W as f32 * dot / 2.0).round(), y: (cy - GRID_H as f32 * dot / 2.0).round(), dot }
+}
+
+impl Grid {
+    pub fn w(&self) -> f32 {
+        GRID_W as f32 * self.dot
+    }
+    pub fn h(&self) -> f32 {
+        GRID_H as f32 * self.dot
+    }
+    /// One dot's left, top, right and bottom edges, on whole pixels like the LCD's dots.
+    pub fn edges(&self, gx: i32, gy: i32) -> (f32, f32, f32, f32) {
+        let at = |o: f32, i: i32| (o + i as f32 * self.dot).round();
+        (at(self.x, gx), at(self.y, gy), at(self.x, gx + 1), at(self.y, gy + 1))
+    }
+    /// The dot under a window-pixel position.
+    pub fn at(&self, px: f32, py: f32) -> Option<(i32, i32)> {
+        let gx = ((px - self.x) / self.dot).floor() as i32;
+        let gy = ((py - self.y) / self.dot).floor() as i32;
+        ((0..GRID_W).contains(&gx) && (0..GRID_H).contains(&gy)).then_some((gx, gy))
+    }
+}
+
+/// A [`GRID_W`]x[`GRID_H`] bitmap, row by row.
+struct Dots(Vec<bool>);
+
+impl Dots {
+    fn set(&mut self, x: i32, y: i32, on: bool) {
+        if (0..GRID_W).contains(&x) && (0..GRID_H).contains(&y) {
+            self.0[(y * GRID_W + x) as usize] = on;
+        }
+    }
+    fn text(&mut self, s: &str, x: i32, y: i32, on: bool) {
+        for_each_dot(s, |dx, dy| self.set(x + dx, y + dy, on));
+    }
+    fn fill(&mut self, y: i32, h: i32) {
+        for yy in y..y + h {
+            for x in 0..GRID_W {
+                self.set(x, yy, true);
+            }
+        }
+    }
+}
+
+/// Where a row's text starts, `r` rows down the screen.
+fn row_y(r: usize) -> i32 {
+    FIRST_ROW + 1 + r as i32 * ROW_DOTS
+}
+
+/// The open page as lit dots: the title (with the highlighted row's number), then a screenful
+/// of rows with the highlighted one shown inverted, or a help page's lines.
+pub fn dots(core: &Core) -> Vec<bool> {
+    let o = &core.overlay;
+    let mut d = Dots(vec![false; (GRID_W * GRID_H) as usize]);
+    if !o.is_open() {
+        return d.0;
+    }
+    d.text(o.title(), 1, 1, true);
+    match o.page {
+        Page::Closed => {}
+        Page::Help => {
+            let (_, lines) = HELP_PAGES[o.help.min(HELP_PAGES.len() - 1)];
+            for (r, l) in lines.iter().enumerate() {
+                d.text(l, 1, row_y(r), true);
+            }
+        }
+        Page::Menu | Page::Shell | Page::Part(_) => {
+            let items = items(core);
+            let hover = o.hover.unwrap_or(0);
+            let count = format!("{}/{}", hover + 1, items.len());
+            d.text(&count, GRID_W - 1 - text_width(&count), 1, true);
+            let first = o.first_row();
+            for (r, it) in items.iter().enumerate().skip(first).take(VISIBLE) {
+                let y = row_y(r - first);
+                let lit = r == hover;
+                if lit {
+                    d.fill(y - 1, ROW_DOTS + 1);
+                }
+                d.text(it.label, 1, y, !lit);
+                d.text(&it.value, GRID_W - 1 - text_width(&it.value), y, !lit);
+            }
+        }
+    }
+    d.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::font::text_width;
+    use crate::layout::{icon_rects, BUTTONS, FACE, STAR};
 
-    fn width_dots(chars: usize) -> i32 {
-        chars as i32 * 4 - 1
+    fn core() -> Core {
+        let content = crate::content::Content::builtin();
+        let game = crate::sim::Game::new(&content, crate::rng::Pcg32::new(1));
+        Core::new(content, game)
+    }
+
+    /// Window pixels for a design-space point.
+    fn px(scale: f32, x: f32, y: f32) -> (f32, f32) {
+        ((x - VIEW.0) * scale, (y - VIEW.1) * scale)
     }
 
     #[test]
-    fn the_panel_fits_and_stays_readable_at_every_size() {
-        for &(name, scale) in &SIZES {
+    fn the_screen_stays_on_the_faceplate_and_readable_at_every_size() {
+        for &(name, size) in &SIZES {
             for dpi in [1.0f32, 1.25, 1.5, 2.0] {
-                let (w, h) = crate::render::window_size(scale * dpi);
-                let p = panel(w as f32, h as f32);
-                assert!(p.x >= 0.0 && p.y >= 0.0, "{name} @{dpi}: {p:?}");
-                assert!(p.x + p.w <= w as f32 && p.y + p.h <= h as f32, "{name} @{dpi}: {p:?} in {w}x{h}");
-                // 2 px per dot makes 10 px capitals: the smallest that reads comfortably
-                assert!(p.fs >= 2.0 * dpi.floor(), "{name} @{dpi}: dots of {} px", p.fs);
+                let scale = size * dpi;
+                let g = grid(scale);
+                assert!(g.dot >= MIN_DOT, "{name} @{dpi}: dots of {} px", g.dot);
+                // always on the faceplate
+                let (fx, fy) = px(scale, FACE.0, FACE.1);
+                let (fx1, fy1) = px(scale, FACE.0 + FACE.2, FACE.1 + FACE.3);
+                assert!(g.x >= fx && g.y >= fy && g.x + g.w() <= fx1 && g.y + g.h() <= fy1, "{name} @{dpi}: {g:?}");
+                // and, unless the LCD had to grow, clear of the icons
+                if CELL / 2.0 * scale >= MIN_DOT {
+                    for &(x, y, w, h) in &icon_rects() {
+                        let (ix, iy) = px(scale, x, y);
+                        let (ix1, iy1) = px(scale, x + w, y + h);
+                        let apart = ix1 <= g.x || ix >= g.x + g.w() || iy1 <= g.y || iy >= g.y + g.h();
+                        assert!(apart, "{name} @{dpi}: the screen covers an icon");
+                    }
+                }
             }
         }
-        // bigger devices get bigger text
-        let fs: Vec<f32> = SIZES
-            .iter()
-            .map(|&(_, s)| {
-                let (w, h) = crate::render::window_size(s);
-                panel(w as f32, h as f32).fs
-            })
-            .collect();
-        assert!(fs.windows(2).all(|p| p[0] <= p[1]) && fs[0] < fs[3], "{fs:?}");
     }
 
     #[test]
-    fn every_line_fits_the_panel() {
-        let content = width_dots(COLS);
+    fn every_line_fits_the_screen() {
+        // a dot's margin each side and at least a space between label and value
+        let fits = |a: &str, b: &str| text_width(a) + if b.is_empty() { 0 } else { 5 + text_width(b) } <= GRID_W - 2;
         for hide in ["HIDE TO TRAY", "MINIMIZE"] {
-            let env = Env { login: false, hide_label: hide };
-            let mut core = Core::new(
-                crate::content::Content::builtin(),
-                crate::sim::Game::new(&crate::content::Content::builtin(), crate::rng::Pcg32::new(1)),
-            );
-            let fits = |it: &Item| {
-                let gap = if it.value.is_empty() { 0 } else { 8 };
-                let w = text_width(it.label) + gap + text_width(&it.value);
-                assert!(w <= content, "{} {} is too wide", it.label, it.value);
+            let mut core = core();
+            core.overlay.env = Env { login: false, hide_label: hide };
+            let check = |core: &Core| {
+                for it in items(core) {
+                    assert!(fits(it.label, &it.value), "{} {} is too wide", it.label, it.value);
+                }
+                let n = items(core).len();
+                assert_eq!(n, core.overlay.rows());
+                assert!(fits(core.overlay.title(), &format!("{n}/{n}")), "{}", core.overlay.title());
             };
+            core.overlay.open();
             for &(_, s) in &SIZES {
                 core.game.settings.ui.scale = s;
-                let items = items(&core, &env);
-                assert_eq!(items.len(), ROWS);
-                items.iter().for_each(fits);
+                check(&core);
             }
             // every preset, and CUSTOM, on the menu and the SHELL page
             for shell in 0..=crate::look::PRESETS.len() as u32 {
@@ -478,81 +510,112 @@ mod tests {
                 }
                 for page in [Page::Menu, Page::Shell] {
                     core.overlay.page = page;
-                    items(&core, &env).iter().for_each(fits);
+                    check(&core);
                 }
             }
             // every option of every part
             for part in Part::ALL {
                 core.overlay.page = Page::Part(part);
-                assert_eq!(items(&core, &env).len(), core.overlay.rows());
                 for &f in part.fields() {
                     for i in 0..f.count() {
                         core.game.settings.look.set(f, i);
-                        items(&core, &env).iter().for_each(fits);
+                        check(&core);
                     }
                 }
             }
-            core.overlay.page = Page::Shell;
-            assert_eq!(items(&core, &env).len(), core.overlay.rows());
-            assert!(core.overlay.rows() <= ROWS);
-            core.overlay.page = Page::Closed;
         }
         for (title, lines) in HELP_PAGES {
-            assert!(lines.len() <= ROWS, "{title} has too many lines");
+            assert!(lines.len() <= VISIBLE, "{title} has too many lines");
             for l in std::iter::once(&title).chain(lines.iter()) {
-                assert!(text_width(l) <= content, "help line {l:?} is too wide");
+                assert!(fits(l, ""), "help line {l:?} is too wide");
             }
         }
+        // the last row's highlight ends on the screen's last line of dots
+        assert_eq!(row_y(VISIBLE - 1) + 5, GRID_H - 1);
     }
 
     #[test]
-    fn clicking_rows_and_pages() {
-        let content = crate::content::Content::builtin();
-        let game = crate::sim::Game::new(&content, crate::rng::Pcg32::new(1));
-        let mut core = Core::new(content, game);
-        let env = Env { login: false, hide_label: "MINIMIZE" };
-        let (w, h) = crate::render::window_size(0.4);
-        let (w, h) = (w as f32, h as f32);
-        let p = panel(w, h);
-        let row = |i: usize| (p.x + p.w / 2.0, p.top + (i as f32 + 0.5) * p.row_h);
+    fn the_page_is_drawn_with_the_highlighted_row_inverted() {
+        let mut core = core();
         core.overlay.open();
-        // SOUND row toggles the sound
+        core.overlay.hover = Some(4);
+        let d = dots(&core);
+        let lit = |x: i32, y: i32| d[(y * GRID_W + x) as usize];
+        // the second screenful, rows 4-7; ON TOP (row 4) is first and lit right across
+        let y = row_y(0);
+        assert!(lit(0, y - 1) && lit(GRID_W - 1, y + 5));
+        assert!(!lit(0, row_y(1)));
+        // the title and the row count are lit dots on the unlit screen
+        assert!((0..GRID_W).any(|x| lit(x, 1)));
+        assert!(lit(GRID_W - 2, 5), "5/11 ends in a 1, whose base is 3 dots wide");
+        // nothing is lit while the settings are shut
+        core.overlay.close();
+        assert!(dots(&core).iter().all(|&v| !v));
+    }
+
+    #[test]
+    fn the_device_buttons_work_the_settings() {
+        let mut core = core();
+        core.overlay.open();
+        // A walks down the rows, B changes one, C goes back and finally closes
+        core.press(Button::A);
+        core.release(Button::A);
+        assert_eq!(core.overlay.hover, Some(1));
+        core.tap(Button::B);
+        assert_eq!(core.overlay.page, Page::Shell);
+        core.tap(Button::B);
+        assert_eq!(core.game.settings.shell_name(), "LIME");
+        core.tap(Button::C);
+        assert_eq!((core.overlay.page, core.overlay.hover), (Page::Menu, Some(1)));
+        // the SIZE row's command waits for the desktop
+        core.overlay.hover = Some(0);
+        core.tap(Button::B);
+        assert!(matches!(core.overlay.take_cmds()[..], [DesktopCmd::SetScale(_)]));
+        core.tap(Button::C);
+        assert!(!core.overlay.is_open());
+        // the game didn't see any of it: still on the home screen with nothing selected
+        assert!(core.at_home());
+        assert_eq!(core.ui.sel, -1);
+    }
+
+    #[test]
+    fn the_wheel_picks_a_row_and_a_click_chooses_it() {
+        // with the mouse, the wheel moves the highlight and a click is B (see the desktop shell)
+        let mut core = core();
+        core.overlay.open();
+        // three notches down to SOUND, and a click toggles the sound
         let muted = core.game.settings.muted;
-        let (x, y) = row(3);
-        assert_eq!(click(&mut core, &env, x, y, w, h), None);
+        scroll(&mut core, 3);
+        core.tap(Button::B);
         assert_ne!(core.game.settings.muted, muted);
-        // HELP opens page 1, clicks turn the pages, then back to the menu
-        let (x, y) = row(7);
-        click(&mut core, &env, x, y, w, h);
+        // down to HELP, on the next screenful
+        scroll(&mut core, 4);
+        assert_eq!((core.overlay.hover, core.overlay.first_row()), (Some(7), 4));
+        core.tap(Button::B);
         assert_eq!((core.overlay.page, core.overlay.help), (Page::Help, 0));
-        click(&mut core, &env, x, y, w, h);
-        assert_eq!((core.overlay.page, core.overlay.help), (Page::Help, 1));
-        click(&mut core, &env, x, y, w, h);
+        // clicks turn the help pages, then it's back to the menu
+        for i in 1..HELP_PAGES.len() {
+            core.tap(Button::B);
+            assert_eq!((core.overlay.page, core.overlay.help), (Page::Help, i));
+        }
+        core.tap(Button::B);
         assert_eq!(core.overlay.page, Page::Menu);
-        // the SIZE row asks the shell to resize
-        let (x, y) = row(0);
-        assert!(matches!(click(&mut core, &env, x, y, w, h), Some(DesktopCmd::SetScale(_))));
-        // a click outside the panel closes the menu
-        click(&mut core, &env, 1.0, 1.0, w, h);
+        // up past the top wraps round to CLOSE, and choosing it closes the settings
+        core.overlay.hover = Some(0);
+        scroll(&mut core, -1);
+        assert_eq!(items(&core)[core.overlay.hover.unwrap()].label, "CLOSE");
+        core.tap(Button::B);
         assert!(!core.overlay.is_open());
     }
 
     #[test]
     fn the_shell_pages() {
-        let content = crate::content::Content::builtin();
-        let game = crate::sim::Game::new(&content, crate::rng::Pcg32::new(1));
-        let mut core = Core::new(content, game);
-        let env = Env { login: false, hide_label: "MINIMIZE" };
-        let (w, h) = crate::render::window_size(0.55);
-        let (w, h) = (w as f32, h as f32);
-        // rows of whichever page is open
-        let row = |core: &Core, i: usize| {
-            let p = core.overlay.panel(w, h);
-            (p.x + p.w / 2.0, p.top + (i as f32 + 0.5) * p.row_h)
-        };
-        let click_row = |core: &mut Core, i: usize| {
-            let (x, y) = row(core, i);
-            click(core, &env, x, y, w, h)
+        let mut core = core();
+        let scale = 0.55;
+        let g = grid(scale);
+        let click_row = |core: &mut Core, r: usize| {
+            core.overlay.hover = Some(r);
+            core.tap(Button::B);
         };
         core.overlay.open();
         // SHELL opens its page; PRESET steps through the presets
@@ -563,37 +626,22 @@ mod tests {
         // BUTTONS > SHAPE changes just the buttons
         click_row(&mut core, 2);
         assert_eq!(core.overlay.page, Page::Part(Part::Buttons));
-        assert_eq!(items(&core, &env)[1].value, "ROUND");
+        assert_eq!(items(&core)[1].value, "ROUND");
         click_row(&mut core, 1);
-        assert_eq!(items(&core, &env)[1].value, "SQUARE");
+        assert_eq!(items(&core)[1].value, "SQUARE");
         assert_eq!(core.game.settings.look.body, crate::look::PRESETS[1].look.body);
         assert_eq!(core.game.settings.shell_name(), "CUSTOM");
         // left and right step either way
         core.overlay.hover = Some(1);
-        adjust(&mut core, &env, -1);
+        adjust(&mut core, -1);
         assert_eq!(core.game.settings.shell_name(), "LIME");
-        // a short page's panel is only as tall as its rows, and stays clear of what it changes
-        let p = core.overlay.panel(w, h);
-        assert!(p.h < panel(w, h).h / 2.0, "{p:?}");
-        let (x, y) = row(&core, 4);
-        assert_eq!(row_at(&core.overlay, x, y, w, h), None);
-        use crate::layout::{BUTTONS, STAR, VIEW};
-        let scale = w / VIEW.2;
-        let px = |x: f32, y: f32| ((x - VIEW.0) * scale, (y - VIEW.1) * scale);
+        // the screen leaves the buttons and the antenna in sight
         for &(_, bx, by) in &BUTTONS {
-            let (x, y) = px(bx, by);
-            assert!(!p.contains(x, y), "the panel hides the buttons");
+            let (x, y) = px(scale, bx, by);
+            assert_eq!(g.at(x, y), None, "the screen hides the buttons");
         }
-        core.overlay.go(Page::Part(Part::Antenna), 0);
-        let (x, y) = px(STAR.0, STAR.1);
-        assert!(!core.overlay.panel(w, h).contains(x, y), "the panel hides the antenna");
-        core.overlay.go(Page::Part(Part::Icons), 0);
-        let p = core.overlay.panel(w, h);
-        for &(x, y, iw, ih) in &crate::layout::icon_rects()[5..] {
-            let (x, y) = px(x + iw / 2.0, y + ih / 2.0);
-            assert!(!p.contains(x, y), "the panel hides the bottom icons");
-        }
-        core.overlay.go(Page::Part(Part::Buttons), 1);
+        let (x, y) = px(scale, STAR.0, STAR.1);
+        assert_eq!(g.at(x, y), None, "the screen hides the antenna");
         // BACK, then right-click, then right-click again: up a page each time
         let n = core.overlay.rows();
         click_row(&mut core, n - 1);
@@ -607,7 +655,7 @@ mod tests {
         core.overlay.go(Page::Shell, 0);
         for _ in 0..20 {
             let before = core.game.settings.look;
-            activate(&mut core, &env, Act::Random);
+            activate(&mut core, Act::Random);
             assert_ne!(core.game.settings.look, before);
         }
         // the scroll wheel wraps within the page
@@ -617,45 +665,43 @@ mod tests {
     }
 
     #[test]
+    fn left_and_right_step_sizes_and_speeds_both_ways() {
+        let mut core = core();
+        core.overlay.open();
+        core.game.settings.ui.scale = 0.55;
+        assert_eq!(adjust(&mut core, -1), Some(DesktopCmd::SetScale(0.40)));
+        assert_eq!(adjust(&mut core, -1), Some(DesktopCmd::SetScale(1.0)));
+        core.overlay.hover = Some(2);
+        adjust(&mut core, -1);
+        assert_eq!(core.game.settings.speed, 600);
+        adjust(&mut core, 1);
+        assert_eq!(core.game.settings.speed, 1);
+        // on/off rows flip; rows that open pages ignore it
+        core.overlay.hover = Some(5);
+        let notify = core.game.settings.ui.notify;
+        adjust(&mut core, -1);
+        assert_ne!(core.game.settings.ui.notify, notify);
+        core.overlay.hover = Some(1);
+        adjust(&mut core, 1);
+        assert_eq!(core.overlay.page, Page::Menu);
+    }
+
+    #[test]
     fn sound_steps_through_the_volumes() {
-        let content = crate::content::Content::builtin();
-        let game = crate::sim::Game::new(&content, crate::rng::Pcg32::new(1));
-        let mut core = Core::new(content, game);
-        let env = Env { login: false, hide_label: "MINIMIZE" };
-        let sound = |core: &Core| items(core, &env)[3].value.clone();
+        let mut core = core();
+        let sound = |core: &Core| items(core)[3].value.clone();
         assert_eq!(sound(&core), "100%");
         let mut seen = Vec::new();
         for _ in 0..5 {
-            activate(&mut core, &env, Act::Sound);
+            activate(&mut core, Act::Sound);
             seen.push(sound(&core));
         }
         assert_eq!(seen, ["OFF", "25%", "50%", "75%", "100%"]);
         // muting keeps the volume for when the sound comes back
-        choose(&mut core, Choice::Sound(Some(50)));
+        core.set_sound(Some(50));
         core.toggle_mute();
         assert_eq!(sound(&core), "OFF");
         core.toggle_mute();
         assert_eq!(sound(&core), "50%");
-    }
-
-    #[test]
-    fn choices_set_values_directly() {
-        let content = crate::content::Content::builtin();
-        let game = crate::sim::Game::new(&content, crate::rng::Pcg32::new(1));
-        let mut core = Core::new(content, game);
-        assert_eq!(choose(&mut core, Choice::Size(3)), Some(DesktopCmd::SetScale(1.0)));
-        assert_eq!(core.game.settings.ui.scale, 1.0);
-        choose(&mut core, Choice::Shell(5));
-        choose(&mut core, Choice::Look(Field::Lcd, 3));
-        choose(&mut core, Choice::Speed(60));
-        choose(&mut core, Choice::Sound(None));
-        assert_eq!(choose(&mut core, Choice::OnTop(false)), Some(DesktopCmd::SetOnTop(false)));
-        choose(&mut core, Choice::Notify(false));
-        let s = &core.game.settings;
-        assert_eq!((s.shell, s.speed, s.muted, s.ui.on_top, s.ui.notify), (5, 60, true, false, false));
-        assert_eq!(s.look.lcd, crate::look::Lcd::Amber);
-        assert_eq!(s.look.pattern, crate::look::Pattern::Flame);
-        assert_eq!(s.shell_name(), "CUSTOM");
-        assert_eq!(choose(&mut core, Choice::Login(true)), Some(DesktopCmd::SetLogin(true)));
     }
 }
