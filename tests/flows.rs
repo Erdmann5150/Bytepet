@@ -204,6 +204,120 @@ fn time_can_be_paused_while_closed() {
 }
 
 #[test]
+fn bedtime_can_be_shifted_for_night_owls() {
+    let mut r = Rig::with_pet(9, Stage::Child, "child_a");
+    r.frames(1);
+    assert!(!r.core.game.pet.asleep, "the rig's clock says noon");
+    r.core.click_icon(8);
+    r.taps("AAAAAA"); // SETUP
+    r.tap(Button::B);
+    r.taps("AAAA"); // BEDTIME
+    for _ in 0..12 {
+        r.tap(Button::B);
+    }
+    assert_eq!(r.core.game.settings.bedtime_shift, 12);
+    // a child's 20:00-08:00 night is now 08:00-20:00: it's noon, so bedtime
+    assert!(r.core.game.pet.asleep);
+}
+
+#[test]
+fn a_menu_left_alone_goes_home() {
+    let mut r = Rig::with_pet(9, Stage::Child, "child_a");
+    r.core.click_icon(8);
+    r.tap(Button::B); // MAIL: "NO MAIL", then back to town
+    r.tap(Button::B);
+    assert_eq!(r.top(), "TownMenu");
+    r.frames(30 * 59);
+    assert_eq!(r.top(), "TownMenu", "too soon");
+    r.frames(30 * 2);
+    assert!(r.core.at_home());
+    // the icon cursor stays lit until then, and goes out with the menu
+    assert_eq!(r.core.ui.sel, -1);
+    // at home, a highlighted icon goes out after a while on its own
+    r.tap(Button::A);
+    assert_eq!(r.core.ui.sel, 0);
+    r.frames(30 * 29);
+    assert_eq!(r.core.ui.sel, 0);
+    r.frames(30 * 2);
+    assert_eq!(r.core.ui.sel, -1);
+    // the settings close too, but a press keeps them open (opening them from the tray counts
+    // as a press, see the desktop shell)
+    r.core.overlay.open();
+    r.core.touch();
+    r.frames(30 * 50);
+    r.tap(Button::A);
+    r.frames(30 * 50);
+    assert!(r.core.overlay.is_open());
+    r.frames(30 * 11);
+    assert!(!r.core.overlay.is_open());
+    // a game is never cut short, nor its score
+    let mut r = Rig::with_pet(11, Stage::Teen, "teen_g");
+    r.core.click_icon(3);
+    r.tap(Button::B);
+    assert_eq!(r.top(), "Game");
+    r.frames(30 * 61);
+    assert!(!r.core.at_home(), "{:?}", r.core.stack_names());
+}
+
+#[test]
+fn the_alert_icon_shows_every_need() {
+    let mut r = Rig::with_pet(16, Stage::Child, "child_a");
+    let alert = |r: &Rig| r.core.icon_states(0.0)[9];
+    r.frames(1);
+    assert!(!alert(&r), "a happy, clean pet needs nothing");
+    r.core.game.pet.poop = 1;
+    assert!(alert(&r), "poop");
+    r.core.click_icon(2);
+    assert!(r.until("Main", 90));
+    assert!(!alert(&r));
+    r.core.game.pet.sick = true;
+    assert!(alert(&r), "sick");
+    r.core.game.pet.sick = false;
+    r.core.game.pet.happy = 0;
+    assert!(alert(&r), "an empty heart");
+    r.core.game.pet.happy = 4;
+    // asleep with the lights on is a need; asleep in the dark isn't
+    r.core.game.pet.asleep = true;
+    assert!(alert(&r), "lights");
+    r.core.game.pet.lights = false;
+    r.core.game.pet.hunger = 0;
+    assert!(!alert(&r), "hearts can't be filled while it sleeps");
+}
+
+#[test]
+fn the_tray_tooltip_says_how_the_pet_is() {
+    let mut r = Rig::with_pet(18, Stage::Child, "child_a");
+    r.core.game.pet.age_s = 2.5 * 86400.0;
+    assert_eq!(r.core.summary(), "Test the child, 2 days - hunger 4/4, happy 4/4\nAll good");
+    r.core.game.pet.hunger = 0;
+    r.core.game.pet.poop = 2;
+    r.core.game.pet.sick = true;
+    assert!(r.core.summary().ends_with("\nNeeds food, cleaning, medicine"), "{}", r.core.summary());
+    r.core.game.pet.asleep = true;
+    assert!(r.core.summary().ends_with("\nNeeds cleaning, medicine, lights off"), "{}", r.core.summary());
+    r.core.game.pet = Default::default();
+    assert_eq!(r.core.summary(), "An egg, waiting to hatch");
+}
+
+#[test]
+fn a_still_screen_is_not_redrawn() {
+    use bytepet::render::FrameKey;
+    let mut r = Rig::with_pet(17, Stage::Child, "child_a");
+    let key = |r: &Rig| FrameKey::new(&r.core, 0.55, r.wall);
+    // lights off: the screen is dark and nothing moves, so once the dots have faded in, the
+    // frame stops changing
+    r.core.click_icon(4);
+    r.frames(60);
+    let still = key(&r);
+    r.frames(30);
+    assert_eq!(key(&r), still);
+    // a press changes it
+    r.core.press(Button::A);
+    assert_ne!(key(&r), still);
+    r.core.release(Button::A);
+}
+
+#[test]
 fn clicking_an_icon_switches_menus() {
     let mut r = Rig::with_pet(10, Stage::Child, "child_a");
     r.core.click_icon(1); // food

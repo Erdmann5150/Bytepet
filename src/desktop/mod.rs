@@ -27,7 +27,7 @@ use winit::window::{Icon, Window, WindowId, WindowLevel};
 use bytepet::core::{now_unix, Core};
 use bytepet::layout::{button_at, icon_at, on_device, on_lcd, VIEW};
 use bytepet::overlay::{self, DesktopCmd, Env, Page};
-use bytepet::render::{window_size, Renderer};
+use bytepet::render::{window_size, FrameKey, Renderer};
 use bytepet::screens::Key as ScreenKey;
 use bytepet::Button;
 
@@ -108,6 +108,8 @@ struct App {
     wheel: f64,
     /// The outline the window's click-through shape currently follows.
     shaped: Option<shape::Outline>,
+    /// What the frame on screen shows; a tick that leaves it the same draws nothing.
+    drawn: Option<FrameKey>,
     last_tick: Instant,
     visible: bool,
     quit: bool,
@@ -132,6 +134,7 @@ impl App {
             drag: None,
             wheel: 0.0,
             shaped: None,
+            drawn: None,
             last_tick: Instant::now(),
             visible: true,
             quit: false,
@@ -236,6 +239,7 @@ impl App {
         let Some(win) = self.window() else { return };
         let dpi = win.scale_factor() as f32;
         let s = self.px_scale();
+        self.drawn = Some(FrameKey::new(&self.core, s, wall));
         let mut pm = self.renderer.render(&self.core, s, dpi, wall);
         if self.opts.windowed {
             // no see-through in a normal window: put the device on a dark backdrop
@@ -248,6 +252,10 @@ impl App {
         if let Some(g) = self.gfx.as_mut() {
             g.present(pm.data(), pm.width(), pm.height());
         }
+    }
+
+    fn frame_key(&self) -> FrameKey {
+        FrameKey::new(&self.core, self.px_scale(), now_unix())
     }
 
     fn show(&mut self) {
@@ -310,6 +318,8 @@ impl App {
     }
 
     fn tray_cmd(&mut self, cmd: TrayCmd) {
+        // or the settings it opens could time out at once
+        self.core.touch();
         match cmd {
             TrayCmd::Toggle => {
                 if self.visible && !self.window().map(|w| w.is_minimized().unwrap_or(false)).unwrap_or(false) {
@@ -523,6 +533,9 @@ impl App {
             self.notifier.event(&e, &self.core.game, &self.core.content);
         }
         self.core.overlay.env = self.env();
+        if let Some(t) = self.tray.as_mut() {
+            t.set_status(&self.core.summary());
+        }
         if self.core.ui.request.take().is_some() {
             self.show();
             self.core.overlay.open();
@@ -587,9 +600,19 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
             }
-            WindowEvent::MouseWheel { delta, .. } => self.wheel(delta),
-            WindowEvent::MouseInput { state, button, .. } => self.mouse(state, button),
-            WindowEvent::KeyboardInput { event, .. } => self.key(&event),
+            // the settings take the wheel and arrow keys directly, so count those as use here
+            WindowEvent::MouseWheel { delta, .. } => {
+                self.core.touch();
+                self.wheel(delta);
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                self.core.touch();
+                self.mouse(state, button);
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                self.core.touch();
+                self.key(&event);
+            }
             WindowEvent::Focused(false) => {
                 // don't leave a button stuck down if focus leaves mid-press
                 for b in Button::ALL {
@@ -612,7 +635,8 @@ impl ApplicationHandler<UserEvent> for App {
         let interval = if self.visible && !minimized { FRAME } else { FRAME_HIDDEN };
         if self.last_tick.elapsed() >= interval {
             self.tick();
-            if self.visible && !minimized {
+            // the frame is drawn on the CPU and uploaded: only when something on it changed
+            if self.visible && !minimized && self.drawn.as_ref() != Some(&self.frame_key()) {
                 if let Some(w) = self.window() {
                     w.request_redraw();
                 }

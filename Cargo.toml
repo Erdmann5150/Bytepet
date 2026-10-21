@@ -1,9 +1,9 @@
 [package]
 name = "bytepet"
-version = "2.3.1"
+version = "2.4.0"
 edition = "2021"
 description = "A virtual pet that lives on your desktop"
-rust-version = "1.80"
+rust-version = "1.89"
 
 [lib]
 name = "bytepet"

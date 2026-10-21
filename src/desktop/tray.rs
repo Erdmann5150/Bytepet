@@ -1,9 +1,19 @@
 //! The tray / menu-bar icon: click to show or hide the pet. Its menu is kept short: show or
 //! hide, Settings (which opens them on the device's screen) and Quit. Windows and macOS use
 //! tray-icon; Linux uses the StatusNotifierItem D-Bus protocol (ksni), which KDE, Xfce,
-//! Cinnamon and GNOME-with-AppIndicator understand.
+//! Cinnamon and GNOME-with-AppIndicator understand. Hovering it shows how the pet is doing
+//! (see `Core::summary`).
 
 use winit::event_loop::EventLoopProxy;
+
+/// The tooltip's heading, above the pet's status.
+const TITLE: &str = "Bytepet";
+
+/// Windows cuts tooltips off at 127 characters.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+fn tooltip(status: &str) -> String {
+    format!("{TITLE}\n{status}").chars().take(127).collect()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayCmd {
@@ -57,7 +67,8 @@ pub fn icon_rgba(c: &bytepet::content::Content) -> (Vec<u8>, u32, u32) {
 // ====================================================================== Windows / macOS
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 pub struct Tray {
-    _icon: tray_icon::TrayIcon,
+    icon: tray_icon::TrayIcon,
+    status: String,
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
@@ -96,25 +107,35 @@ impl Tray {
         let icon = Icon::from_rgba(rgba, w, h).ok()?;
         let tray = TrayIconBuilder::new()
             .with_icon(icon)
-            .with_tooltip("Bytepet")
+            .with_tooltip(TITLE)
             .with_menu(Box::new(menu))
             .with_menu_on_left_click(false)
             .build()
             .ok()?;
-        Some(Tray { _icon: tray })
+        Some(Tray { icon: tray, status: String::new() })
+    }
+
+    /// Show the pet's status on hover. Cheap to call every frame: only a change reaches the OS.
+    pub fn set_status(&mut self, status: &str) {
+        if self.status != status {
+            self.status = status.to_string();
+            let _ = self.icon.set_tooltip(Some(tooltip(status)));
+        }
     }
 }
 
 // ====================================================================== Linux
 #[cfg(target_os = "linux")]
 pub struct Tray {
-    _handle: ksni::blocking::Handle<SniTray>,
+    handle: ksni::blocking::Handle<SniTray>,
+    status: String,
 }
 
 #[cfg(target_os = "linux")]
 pub struct SniTray {
     proxy: EventLoopProxy<UserEvent>,
     icon: (Vec<u8>, u32, u32),
+    status: String,
 }
 
 #[cfg(target_os = "linux")]
@@ -130,6 +151,9 @@ impl ksni::Tray for SniTray {
         // SNI wants ARGB32 in network byte order
         let data = rgba.chunks(4).flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
         vec![ksni::Icon { width: *w as i32, height: *h as i32, data }]
+    }
+    fn tool_tip(&self) -> ksni::ToolTip {
+        ksni::ToolTip { title: TITLE.into(), description: self.status.clone(), ..Default::default() }
     }
     fn activate(&mut self, _x: i32, _y: i32) {
         let _ = self.proxy.send_event(UserEvent::Tray(TrayCmd::Toggle));
@@ -159,9 +183,19 @@ impl Tray {
         use ksni::blocking::TrayMethods;
         // If no tray host is running (stock GNOME), the icon simply never appears; the window
         // stays in the taskbar, so nothing is lost.
-        let tray = SniTray { proxy, icon };
+        let tray = SniTray { proxy, icon, status: String::new() };
         let handle = tray.assume_sni_available(true).spawn().ok()?;
-        Some(Tray { _handle: handle })
+        Some(Tray { handle, status: String::new() })
+    }
+
+    /// Show the pet's status on hover. Cheap to call every frame: only a change goes out
+    /// over D-Bus.
+    pub fn set_status(&mut self, status: &str) {
+        if self.status != status {
+            self.status = status.to_string();
+            let s = self.status.clone();
+            self.handle.update(move |t| t.status = s);
+        }
     }
 }
 
@@ -173,4 +207,5 @@ impl Tray {
     pub fn new(_proxy: EventLoopProxy<UserEvent>, _icon: (Vec<u8>, u32, u32)) -> Option<Tray> {
         None
     }
+    pub fn set_status(&mut self, _status: &str) {}
 }

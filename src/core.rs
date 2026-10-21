@@ -15,6 +15,10 @@ use crate::sim::{Event, Game};
 use crate::{Button, Tune};
 
 pub const SAVE_EVERY: f64 = 20.0;
+/// Seconds without a press before a menu left open goes back to the home screen.
+pub const MENU_TIMEOUT: f64 = 60.0;
+/// Seconds without a press before the home screen's icon cursor goes out.
+pub const SELECT_TIMEOUT: f64 = 30.0;
 
 pub struct Core {
     pub content: Content,
@@ -31,6 +35,8 @@ pub struct Core {
     /// A clicked one-shot icon stays lit at least this much longer, then goes out once its
     /// animation is over and the home screen is back.
     unlight: Option<f64>,
+    /// Real seconds since the last button, key, click or scroll (see [`MENU_TIMEOUT`]).
+    idle: f64,
     pending: VecDeque<Event>,
     sfx: Vec<Tune>,
     notices: Vec<Event>,
@@ -61,6 +67,19 @@ pub fn now_unix() -> f64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
 }
 
+/// "MOCHI" as "Mochi".
+pub fn title_case(s: &str) -> String {
+    let mut out = String::new();
+    for (i, ch) in s.chars().enumerate() {
+        if i == 0 {
+            out.extend(ch.to_uppercase());
+        } else {
+            out.extend(ch.to_lowercase());
+        }
+    }
+    out
+}
+
 /// Local hour of day (0..24) for a unix timestamp.
 pub fn local_hour(ts: f64) -> f64 {
     use chrono::{Local, TimeZone, Timelike};
@@ -86,6 +105,7 @@ impl Core {
             held: [false; 3],
             menu_held: [false; 3],
             unlight: None,
+            idle: 0.0,
             pending: VecDeque::new(),
             sfx: Vec::new(),
             notices: Vec::new(),
@@ -106,8 +126,11 @@ impl Core {
         let game = if fresh {
             Game::new(&content, Pcg32::from_time())
         } else {
-            match save::load(&path) {
-                Ok(s) => {
+            match save::load_any(&path) {
+                Ok(save::Loaded { file: s, restored }) => {
+                    if let Some(e) = restored {
+                        notes.push(format!("{e}. Restored the previous save from the backup."));
+                    }
                     let mut g = s.game;
                     g.repair(&content);
                     let gap = now - s.saved_at;
@@ -211,7 +234,14 @@ impl Core {
     }
 
     // ------------------------------------------------------------------ input
+    /// Someone used the device: the menu and icon timeouts start over. The desktop shell
+    /// calls it for input that works the settings directly.
+    pub fn touch(&mut self) {
+        self.idle = 0.0;
+    }
+
     pub fn press(&mut self, b: Button) {
+        self.touch();
         // A and C together toggle the sound, like the real thing
         if (b == Button::A && self.held[2]) || (b == Button::C && self.held[0]) {
             self.held[b.index()] = true;
@@ -244,10 +274,12 @@ impl Core {
     }
 
     pub fn text(&mut self, s: &str) {
+        self.touch();
         self.with_top(|sc, cx| sc.text(cx, s));
     }
 
     pub fn key(&mut self, k: Key) {
+        self.touch();
         self.with_top(|sc, cx| sc.key(cx, k));
     }
 
@@ -255,6 +287,7 @@ impl Core {
     /// long as every screen open above the main one can be left (see `Screen::leavable`).
     /// One-shot icons (clean, lights, medicine) light up only while they act.
     pub fn click_icon(&mut self, i: usize) {
+        self.touch();
         if i >= 9 || self.stack.is_empty() || !self.stack[1..].iter().all(|s| s.leavable()) {
             return;
         }
@@ -272,6 +305,7 @@ impl Core {
     /// Right mouse button: goes up a page of the settings menu if it's open (closing it from the
     /// top), otherwise C. It never opens the settings: that's Town > SETUP > MORE, or the tray.
     pub fn right_click(&mut self) {
+        self.touch();
         if self.overlay.is_open() {
             self.overlay.back();
         } else {
@@ -282,6 +316,7 @@ impl Core {
     /// Scroll wheel: down is A (next), up moves the menu back one. Where there's no menu to
     /// move back through (the mini-games), up is A too.
     pub fn scroll(&mut self, up: bool) {
+        self.touch();
         if up {
             let mut moved = false;
             self.with_top(|s, cx| {
@@ -380,15 +415,40 @@ impl Core {
                 self.ui.sel = -1;
             }
         }
+        self.idle_out(dt);
         self.render_lcd();
         let k = 1.0 - (-dt as f32 * 18.0).exp();
         for (sh, &v) in self.shade.iter_mut().zip(self.lcd.buf.iter()) {
             *sh += (v as f32 - *sh) * k;
+            // settle exactly once the difference can't be seen, so a still screen stays still
+            // (and the desktop shell can skip redrawing it)
+            if (v as f32 - *sh).abs() < 1.0 / 512.0 {
+                *sh = v as f32;
+            }
         }
         self.save_timer += dt;
         if self.save_timer >= SAVE_EVERY {
             self.save_timer = 0.0;
             self.save();
+        }
+    }
+
+    /// Left alone, the device goes back to its home screen like the real thing: an open menu
+    /// (or the settings) after [`MENU_TIMEOUT`], then the icon cursor after [`SELECT_TIMEOUT`].
+    /// Only menus that could be left by clicking an icon time out (see `Screen::leavable`), so
+    /// a game, an animation or a link is never cut short.
+    fn idle_out(&mut self, dt: f64) {
+        self.idle += dt;
+        if self.idle >= MENU_TIMEOUT {
+            if self.overlay.is_open() {
+                self.overlay.close();
+            }
+            if !self.at_home() && self.stack[1..].iter().all(|s| s.leavable()) {
+                self.stack.truncate(1);
+            }
+        }
+        if self.idle >= SELECT_TIMEOUT && self.at_home() && self.ui.sel >= 0 && self.unlight.is_none() {
+            self.ui.sel = -1;
         }
     }
 
@@ -447,11 +507,57 @@ impl Core {
         for (i, o) in out.iter_mut().enumerate() {
             *o = i as i32 == self.ui.sel;
         }
-        out[9] = p.call.is_some();
+        out[9] = p.needs_attention();
         if !p.mail.is_empty() && blink {
             out[8] = true;
         }
         out
+    }
+
+    /// How the pet is doing in a line or two, for the tray icon's tooltip: who it is, its
+    /// hearts, and what it needs (the same things that light the alert icon). Kept well under
+    /// the 127 characters Windows allows.
+    pub fn summary(&self) -> String {
+        use crate::content::Stage;
+        let p = &self.game.pet;
+        let name = title_case(&p.display_name(&self.content));
+        let stage = match p.stage {
+            Stage::Egg => return "An egg, waiting to hatch".into(),
+            Stage::Gone => return format!("{name} went home. A new egg is waiting."),
+            Stage::Baby => "baby",
+            Stage::Child => "child",
+            Stage::Teen => "teen",
+            Stage::Adult => "adult",
+            Stage::Senior => "senior",
+        };
+        let days = p.age_days();
+        let age = if days == 1 { "1 day".to_string() } else { format!("{days} days") };
+        let head = format!("{name} the {stage}, {age} - hunger {}/4, happy {}/4", p.hunger, p.happy);
+        let mut needs = Vec::new();
+        if !p.asleep && p.hunger == 0 {
+            needs.push("food");
+        }
+        if !p.asleep && p.happy == 0 {
+            needs.push("fun");
+        }
+        if p.poop > 0 {
+            needs.push("cleaning");
+        }
+        if p.sick {
+            needs.push("medicine");
+        }
+        if p.asleep && p.lights {
+            needs.push("lights off");
+        }
+        if matches!(&p.call, Some(c) if c.reason == crate::sim::CallReason::Fake) {
+            needs.push("discipline");
+        }
+        let tail = match (needs.is_empty(), p.asleep) {
+            (false, _) => format!("Needs {}", needs.join(", ")),
+            (true, true) => "Asleep".into(),
+            (true, false) => "All good".into(),
+        };
+        format!("{head}\n{tail}")
     }
 
     pub fn status_tags(&self) -> String {

@@ -5,13 +5,16 @@
 //! the desktop shell can carry out are returned as `DesktopCmd`s.
 //!
 //! The SHELL row opens a page of its own: a preset, then one page per part of the device
-//! (body, buttons, antenna, screen, icons) where each setting steps through its options.
+//! (body, buttons, antenna, screen, icons) where each setting steps through its options, then
+//! THEMES, where looks are saved as numbered themes to wear again or delete. RANDOM, when it
+//! would replace a look that isn't saved, and deleting a theme both ask first.
 
 use crate::core::Core;
 use crate::font::{for_each_dot, text_width};
 use crate::layout::{CELL, LCD_POS, VIEW};
 use crate::look::{Field, Look, Part};
 use crate::screens::town::SPEEDS;
+use crate::sim::MAX_THEMES;
 use crate::{Button, Tune};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -23,7 +26,29 @@ pub enum Page {
     /// The preset and the list of parts.
     Shell,
     Part(Part),
+    /// SAVE, then the saved themes.
+    Themes,
+    /// One saved theme: wear it or delete it.
+    Theme(usize),
+    /// NO or YES, before something that can't be undone.
+    Confirm(Ask),
 }
+
+/// What a [`Page::Confirm`] asks about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ask {
+    /// A random look, replacing one that isn't saved.
+    Random,
+    /// Delete a saved theme.
+    Delete(usize),
+}
+
+/// The saved themes' names; there are [`MAX_THEMES`] of them.
+const THEME_NAMES: [&str; MAX_THEMES] =
+    ["THEME 1", "THEME 2", "THEME 3", "THEME 4", "THEME 5", "THEME 6", "THEME 7", "THEME 8", "THEME 9"];
+/// Where THEMES and RANDOM sit on the SHELL page.
+const THEMES_ROW: usize = 1 + Part::ALL.len();
+const RANDOM_ROW: usize = THEMES_ROW + 1;
 
 #[derive(Default, Debug, Clone)]
 pub struct Overlay {
@@ -57,6 +82,17 @@ pub enum Act {
     /// The next option of one setting.
     Field(Field),
     Random,
+    /// Open the THEMES page.
+    Themes,
+    /// Save the look as a new theme.
+    SaveTheme,
+    /// Open a saved theme's page.
+    Theme(usize),
+    Wear(usize),
+    /// Ask before deleting a saved theme.
+    Delete(usize),
+    /// YES on a [`Page::Confirm`].
+    Yes,
     /// Up one page.
     Back,
 }
@@ -103,11 +139,41 @@ pub fn items(core: &Core) -> Vec<Item> {
     let back = Item { label: "BACK", value: String::new(), act: Act::Back };
     match core.overlay.page {
         Page::Shell => {
-            let mut v = vec![Item { label: "PRESET", value: s.shell_name().into(), act: Act::Preset }];
+            let mut v = vec![Item { label: "PRESET", value: s.shell_label(), act: Act::Preset }];
             v.extend(Part::ALL.iter().map(|&p| Item { label: p.name(), value: ">".into(), act: Act::Part(p) }));
+            v.push(Item { label: "THEMES", value: ">".into(), act: Act::Themes });
             v.push(Item { label: "RANDOM", value: String::new(), act: Act::Random });
             v.push(back);
             return v;
+        }
+        Page::Themes => {
+            let save = match s.theme() {
+                Some(_) => "SAVED",
+                None if s.themes.len() >= MAX_THEMES => "FULL",
+                None => "NEW",
+            };
+            let mut v = vec![Item { label: "SAVE", value: save.into(), act: Act::SaveTheme }];
+            v.extend(s.themes.iter().zip(THEME_NAMES).enumerate().map(|(i, (t, name))| Item {
+                label: name,
+                value: if *t == s.look { "ON" } else { ">" }.into(),
+                act: Act::Theme(i),
+            }));
+            v.push(back);
+            return v;
+        }
+        Page::Theme(i) => {
+            let on = s.theme() == Some(i);
+            return vec![
+                Item { label: "WEAR", value: if on { "ON" } else { "" }.into(), act: Act::Wear(i) },
+                Item { label: "DELETE", value: String::new(), act: Act::Delete(i) },
+                back,
+            ];
+        }
+        Page::Confirm(_) => {
+            return vec![
+                Item { label: "NO", value: String::new(), act: Act::Back },
+                Item { label: "YES", value: String::new(), act: Act::Yes },
+            ];
         }
         Page::Part(p) => {
             let mut v: Vec<Item> = p
@@ -123,7 +189,7 @@ pub fn items(core: &Core) -> Vec<Item> {
     let onoff = |b: bool| if b { "ON".to_string() } else { "OFF".to_string() };
     vec![
         Item { label: "SIZE", value: size_name(s.ui.scale).into(), act: Act::Size },
-        Item { label: "SHELL", value: s.shell_name().into(), act: Act::Shell },
+        Item { label: "SHELL", value: s.shell_label(), act: Act::Shell },
         Item { label: "SPEED", value: format!("{}X", s.speed), act: Act::Speed },
         Item { label: "SOUND", value: s.sound_label(), act: Act::Sound },
         Item { label: "ON TOP", value: onoff(s.ui.on_top), act: Act::OnTop },
@@ -181,21 +247,16 @@ impl Overlay {
         match self.page {
             Page::Part(p) => self.go(Page::Shell, 1 + p as usize),
             Page::Shell => self.go(Page::Menu, 1),
+            Page::Themes => self.go(Page::Shell, THEMES_ROW),
+            Page::Theme(i) => self.go(Page::Themes, 1 + i),
+            Page::Confirm(Ask::Random) => self.go(Page::Shell, RANDOM_ROW),
+            Page::Confirm(Ask::Delete(i)) => self.go(Page::Theme(i), 1),
             _ => self.close(),
         }
     }
     /// Is this a page of rows to pick from?
     pub fn has_rows(&self) -> bool {
-        matches!(self.page, Page::Menu | Page::Shell | Page::Part(_))
-    }
-    /// How many rows the page has.
-    pub fn rows(&self) -> usize {
-        match self.page {
-            Page::Menu => 11,
-            Page::Shell => Part::ALL.len() + 3,
-            Page::Part(p) => p.fields().len() + 1,
-            Page::Help | Page::Closed => 0,
-        }
+        !matches!(self.page, Page::Closed | Page::Help)
     }
     /// The page's title.
     pub fn title(&self) -> &'static str {
@@ -204,6 +265,10 @@ impl Overlay {
             Page::Help => HELP_PAGES[self.help.min(HELP_PAGES.len() - 1)].0,
             Page::Shell => "SHELL",
             Page::Part(p) => p.name(),
+            Page::Themes => "THEMES",
+            Page::Theme(i) => THEME_NAMES[i.min(MAX_THEMES - 1)],
+            Page::Confirm(Ask::Random) => "RANDOM?",
+            Page::Confirm(Ask::Delete(_)) => "DELETE?",
         }
     }
     /// The first row on screen: rows show [`VISIBLE`] at a time, a screenful per step.
@@ -230,13 +295,29 @@ pub fn activate(core: &mut Core, act: Act) -> Option<DesktopCmd> {
         Act::Preset => s.next_shell(),
         Act::Part(p) => core.overlay.go(Page::Part(p), 0),
         Act::Field(f) => s.look.step(f, 1),
-        Act::Random => {
-            let mut rng = crate::rng::Pcg32::new(crate::core::now_unix().to_bits());
-            let old = s.look;
-            while s.look == old {
-                s.look = Look::random(&mut rng);
+        // a look that would be lost isn't replaced without asking
+        Act::Random if s.look_unsaved() => core.overlay.go(Page::Confirm(Ask::Random), 0),
+        Act::Random => randomize(&mut s.look),
+        Act::Themes => core.overlay.go(Page::Themes, 0),
+        Act::SaveTheme => {
+            if s.save_theme().is_none() {
+                core.play(Tune::No);
             }
         }
+        Act::Theme(i) => core.overlay.go(Page::Theme(i), 0),
+        Act::Wear(i) => s.wear_theme(i),
+        Act::Delete(i) => core.overlay.go(Page::Confirm(Ask::Delete(i)), 0),
+        Act::Yes => match core.overlay.page {
+            Page::Confirm(Ask::Random) => {
+                randomize(&mut s.look);
+                core.overlay.back();
+            }
+            Page::Confirm(Ask::Delete(i)) => {
+                s.delete_theme(i);
+                core.overlay.go(Page::Themes, 0);
+            }
+            _ => {}
+        },
         Act::Back => core.overlay.back(),
         Act::Speed => core.cycle_speed(),
         Act::Sound => core.cycle_sound(),
@@ -255,6 +336,15 @@ pub fn activate(core: &mut Core, act: Act) -> Option<DesktopCmd> {
         Act::Close => core.overlay.close(),
     }
     None
+}
+
+/// Every part at random, always changing something.
+fn randomize(look: &mut Look) {
+    let mut rng = crate::rng::Pcg32::new(crate::core::now_unix().to_bits());
+    let old = *look;
+    while *look == old {
+        *look = Look::random(&mut rng);
+    }
 }
 
 fn step_size(core: &mut Core, dir: i32) -> DesktopCmd {
@@ -322,7 +412,7 @@ pub fn button(core: &mut Core, b: Button) -> Option<DesktopCmd> {
 /// Mouse wheel over the menu: positive `steps` move the highlight down.
 pub fn scroll(core: &mut Core, steps: i32) {
     if core.overlay.has_rows() {
-        let n = core.overlay.rows() as i32;
+        let n = items(core).len() as i32;
         let h = core.overlay.hover.unwrap_or(0) as i32;
         core.overlay.hover = Some((h + steps).rem_euclid(n) as usize);
     }
@@ -422,7 +512,7 @@ pub fn dots(core: &Core) -> Vec<bool> {
                 d.text(l, 1, row_y(r), true);
             }
         }
-        Page::Menu | Page::Shell | Page::Part(_) => {
+        Page::Menu | Page::Shell | Page::Part(_) | Page::Themes | Page::Theme(_) | Page::Confirm(_) => {
             let items = items(core);
             let hover = o.hover.unwrap_or(0);
             let count = format!("{}/{}", hover + 1, items.len());
@@ -494,7 +584,6 @@ mod tests {
                     assert!(fits(it.label, &it.value), "{} {} is too wide", it.label, it.value);
                 }
                 let n = items(core).len();
-                assert_eq!(n, core.overlay.rows());
                 assert!(fits(core.overlay.title(), &format!("{n}/{n}")), "{}", core.overlay.title());
             };
             core.overlay.open();
@@ -523,6 +612,23 @@ mod tests {
                     }
                 }
             }
+            // a full set of themes, wearing one, and the questions
+            let s = &mut core.game.settings;
+            while s.themes.len() < MAX_THEMES {
+                s.look.step(Field::Body, 1);
+                s.save_theme();
+            }
+            for page in [Page::Themes, Page::Theme(MAX_THEMES - 1), Page::Confirm(Ask::Random)] {
+                core.overlay.page = page;
+                check(&core);
+            }
+            core.overlay.page = Page::Confirm(Ask::Delete(0));
+            check(&core);
+            core.game.settings.wear_theme(MAX_THEMES - 1);
+            core.overlay.page = Page::Menu;
+            check(&core);
+            core.overlay.page = Page::Shell;
+            check(&core);
         }
         for (title, lines) in HELP_PAGES {
             assert!(lines.len() <= VISIBLE, "{title} has too many lines");
@@ -643,7 +749,7 @@ mod tests {
         let (x, y) = px(scale, STAR.0, STAR.1);
         assert_eq!(g.at(x, y), None, "the screen hides the antenna");
         // BACK, then right-click, then right-click again: up a page each time
-        let n = core.overlay.rows();
+        let n = items(&core).len();
         click_row(&mut core, n - 1);
         assert_eq!((core.overlay.page, core.overlay.hover), (Page::Shell, Some(2)));
         core.right_click();
@@ -653,15 +759,74 @@ mod tests {
         // RANDOM always changes something
         core.overlay.open();
         core.overlay.go(Page::Shell, 0);
+        core.game.settings.set_shell(2);
         for _ in 0..20 {
             let before = core.game.settings.look;
+            let unsaved = core.game.settings.look_unsaved();
             activate(&mut core, Act::Random);
+            if unsaved {
+                // a look that isn't saved anywhere: it asks first, and NO keeps it
+                assert_eq!((core.overlay.page, core.game.settings.look), (Page::Confirm(Ask::Random), before));
+                core.tap(Button::B);
+                assert_eq!((core.overlay.page, core.overlay.hover), (Page::Shell, Some(RANDOM_ROW)));
+                assert_eq!(core.game.settings.look, before);
+                activate(&mut core, Act::Random);
+                core.overlay.hover = Some(1);
+                core.tap(Button::B); // YES
+                assert_eq!((core.overlay.page, core.overlay.hover), (Page::Shell, Some(RANDOM_ROW)));
+            }
             assert_ne!(core.game.settings.look, before);
         }
         // the scroll wheel wraps within the page
         core.overlay.go(Page::Part(Part::Antenna), 0);
         scroll(&mut core, -1);
         assert_eq!(core.overlay.hover, Some(3));
+    }
+
+    #[test]
+    fn looks_are_saved_as_themes_worn_again_and_deleted() {
+        let mut core = core();
+        let click_row = |core: &mut Core, r: usize| {
+            core.overlay.hover = Some(r);
+            core.tap(Button::B);
+        };
+        core.overlay.open();
+        click_row(&mut core, 1); // SHELL
+        core.game.settings.look.step(Field::Ring, 1);
+        let mine = core.game.settings.look;
+        click_row(&mut core, THEMES_ROW);
+        assert_eq!((core.overlay.page, items(&core)[0].value.as_str()), (Page::Themes, "NEW"));
+        click_row(&mut core, 0); // SAVE
+        assert_eq!(core.game.settings.themes, vec![mine]);
+        assert_eq!((items(&core)[0].value.as_str(), items(&core)[1].label), ("SAVED", "THEME 1"));
+        // a saved look is safe: RANDOM doesn't ask
+        core.overlay.back();
+        assert_eq!(core.overlay.hover, Some(THEMES_ROW));
+        click_row(&mut core, RANDOM_ROW);
+        assert_eq!(core.overlay.page, Page::Shell);
+        assert_ne!(core.game.settings.look, mine);
+        assert_eq!(items(&core)[0].value, "CUSTOM");
+        // wear it again
+        click_row(&mut core, THEMES_ROW);
+        click_row(&mut core, 1);
+        assert_eq!(core.overlay.page, Page::Theme(0));
+        click_row(&mut core, 0); // WEAR
+        assert_eq!(core.game.settings.look, mine);
+        assert_eq!(core.game.settings.shell_label(), "THEME 1");
+        // DELETE asks, NO keeps it, YES deletes it and goes back to the list
+        click_row(&mut core, 1);
+        assert_eq!(core.overlay.page, Page::Confirm(Ask::Delete(0)));
+        click_row(&mut core, 0);
+        assert_eq!((core.overlay.page, core.overlay.hover), (Page::Theme(0), Some(1)));
+        assert_eq!(core.game.settings.themes.len(), 1);
+        click_row(&mut core, 1);
+        click_row(&mut core, 1); // YES
+        assert_eq!(core.overlay.page, Page::Themes);
+        assert!(core.game.settings.themes.is_empty());
+        assert_eq!(core.game.settings.look, mine, "the device still wears it");
+        // up the pages: the list, then the SHELL page on THEMES
+        core.right_click();
+        assert_eq!((core.overlay.page, core.overlay.hover), (Page::Shell, Some(THEMES_ROW)));
     }
 
     #[test]
