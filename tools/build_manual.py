@@ -338,8 +338,8 @@ story += [P("Living on your desktop", "h2"),
             "sight. Use the device's buttons: <b>A</b> moves to the next row, <b>B</b> changes or opens it and "
             "<b>C</b> goes back. With the mouse, <b>scroll</b> to pick a row, <b>click</b> to change or open it "
             "and <b>right-click</b> to go back. On the keyboard, the left and right arrows step a setting either "
-            "way. Left alone, a menu or the settings go back to the home screen after a minute, and a lit icon "
-            "goes out after 30 seconds; games, animations and links are never cut short:"),
+            "way. Left alone, a menu or the settings go back to the home screen, and a lit icon goes out, after "
+            "10 seconds; games, animations and links are never cut short:"),
           menu, Spacer(1, 6), sizes, Spacer(1, 4),
           tip("On Windows and macOS, Bytepet doesn't appear in the taskbar or Dock. Click its tray icon "
               "(notification area or menu bar) to show or hide it; right-click it for Settings and Quit. Hover "
@@ -588,7 +588,7 @@ custom = table([["Page", "Settings"],
                          "Hearts), ACCENT (the pattern's colour; AUTO keeps its own) and GLOSS (the shine)."],
                 ["BUTTONS", "COLOR (AUTO matches the body), SHAPE (Round, Square, Gem, Heart or Star) and "
                             "LETTERS (the A, B and C under them)."],
-                ["ANTENNA", "SHAPE (Star, Heart, Moon, Bolt, Ball or None), COLOR and RING (the key ring on top)."],
+                ["ANTENNA", "SHAPE (Star, Heart, Moon, Bolt, Ball or None), COLOR, SIDE (Left or Right) and RING (the key ring tab on top)."],
                 ["SCREEN", "FACE (the panel around the screen), EDGE (its rim), FRAME (the border right around the "
                            "screen), CORNERS (Round, Soft or Square) and LCD (Classic, Gray, Blue, Amber or Pink)."],
                 ["ICONS", "ICONS (the menu icons), SELECT (the selected icon), ALERT (the attention icon, lit "
@@ -608,8 +608,8 @@ story += [KeepTogether([
       "see each part change as you go. Once you've changed anything, the shell reads <b>CUSTOM</b>. "
       "Right-click or <b>C</b> goes back a page."),
     Spacer(1, 4), img("customs", CW),
-    P("Six designs of your own. Between them they use every antenna (including none), every button shape, all "
-      "three corner styles and all five LCD colours.", "cap")]),
+    P("Six designs of your own. Between them they use every antenna (including none) on either side, every button "
+      "shape, all three corner styles and all five LCD colours.", "cap")]),
     # free to run on to the next page (its header repeats), so it never leaves a gap behind
     Spacer(1, 6), custom]
 

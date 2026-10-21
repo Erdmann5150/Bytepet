@@ -9,8 +9,8 @@
 #![cfg_attr(target_os = "macos", allow(unused_imports, dead_code, unused_variables))]
 #![cfg_attr(target_os = "windows", allow(unused_imports))]
 
-use bytepet::layout::{antenna_points, egg_points, CX, CY, RING, SHELL_A, SHELL_B, STAR, VIEW};
-use bytepet::look::{Antenna, Look};
+use bytepet::layout::{antenna_points, egg_points, stem, stem_band, CX, CY, RING, SHELL_A, SHELL_B, VIEW};
+use bytepet::look::{Antenna, Look, Side};
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use winit::window::Window;
 
@@ -22,37 +22,28 @@ type Box4 = (i32, i32, i32, i32);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Outline {
     pub antenna: Antenna,
+    pub side: Side,
     pub ring: bool,
 }
 
 impl Outline {
     pub fn new(look: &Look) -> Outline {
-        Outline { antenna: look.antenna, ring: look.ring }
+        Outline { antenna: look.antenna, side: look.antenna_side, ring: look.ring }
     }
 }
 
 /// Device outline polygons in window pixels, for a scale of `s` pixels per design unit: the
-/// egg, then any antenna and its stem, then the key ring's box if it has one.
+/// egg, then any antenna and its stem, then the key ring tab's box if it has one.
 fn outlines(s: f32, o: &Outline) -> (Poly, Vec<Poly>, Option<Box4>) {
     let to_px = |(x, y): (f32, f32)| (((x - VIEW.0) * s).round() as i32, ((y - VIEW.1) * s).round() as i32);
     let egg: Vec<(i32, i32)> = egg_points(CX, CY, SHELL_A + 3.0, SHELL_B + 3.0, 120).into_iter().map(to_px).collect();
     // the antenna, grown a little, and the stem joining it to the shell
     let mut parts = Vec::new();
-    let antenna = antenna_points(o.antenna);
+    let antenna = antenna_points(o.antenna, o.side);
     if !antenna.is_empty() {
-        parts.push(
-            antenna
-                .into_iter()
-                .map(|(x, y)| (STAR.0 + (x - STAR.0) * 1.15, STAR.1 + (y - STAR.1) * 1.15))
-                .map(to_px)
-                .collect(),
-        );
-        parts.push(
-            [(8.0, 16.0), (16.0, 8.0), (56.0, 48.0), (48.0, 56.0)]
-                .into_iter()
-                .map(|(dx, dy)| to_px((STAR.0 + dx, STAR.1 + dy)))
-                .collect(),
-        );
+        let ((mx, my), _) = stem(o.side);
+        parts.push(antenna.into_iter().map(|(x, y)| (mx + (x - mx) * 1.15, my + (y - my) * 1.15)).map(to_px).collect());
+        parts.push(stem_band(o.side, 4.0).into_iter().map(to_px).collect());
     }
     let ring = o.ring.then(|| {
         let (rx0, ry0) = to_px((RING.0 - RING.2, RING.1 - RING.2));

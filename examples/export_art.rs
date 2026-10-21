@@ -120,9 +120,10 @@ fn shot(look: Look, (stage, character): (Stage, &str), seed: u64, scale: f32, tw
 }
 
 /// Made-up looks that between them use every antenna, button shape, corner style and LCD
-/// colour, including the ones no preset has: no antenna, star buttons and soft corners.
+/// colour, including the ones no preset has: no antenna, star buttons, soft corners and an
+/// antenna on the right.
 fn showcase() -> [Look; 6] {
-    use bytepet::look::{Antenna as A, ButtonShape as B, Corners as C, Lcd as L, Pattern as P, PALETTE};
+    use bytepet::look::{Antenna as A, ButtonShape as B, Corners as C, Lcd as L, Pattern as P, Side, PALETTE};
     let c = |i: usize| PALETTE[i].1;
     let look = |body, pattern, buttons, button_shape, antenna, corners, lcd| Look {
         pattern,
@@ -134,12 +135,13 @@ fn showcase() -> [Look; 6] {
         lcd,
         ..Look::plain(body)
     };
+    let right = |look: Look| Look { antenna_side: Side::Right, ..look };
     [
         look(c(12), P::Stripes, c(3), B::Star, A::None, C::Soft, L::Gray), // purple, yellow stars
         look(c(8), P::Dots, c(4), B::Gem, A::Star, C::Square, L::Amber),   // teal, gold
         look(c(10), P::Hearts, c(0), B::Heart, A::Heart, C::Round, L::Pink), // sky, pink hearts
-        look(c(3), P::Zebra, c(19), B::Square, A::Bolt, C::Soft, L::Classic), // yellow and black
-        look(c(11), P::Sprinkles, c(17), B::Round, A::Moon, C::Round, L::Blue), // navy, silver
+        right(look(c(3), P::Zebra, c(19), B::Square, A::Bolt, C::Soft, L::Classic)), // yellow and black
+        right(look(c(11), P::Sprinkles, c(17), B::Round, A::Moon, C::Round, L::Blue)), // navy, silver
         look(c(5), P::Camo, c(2), B::Star, A::Ball, C::Square, L::Classic), // lime, orange
     ]
 }
@@ -170,11 +172,13 @@ fn row(devices: &[Pixmap], overlap: f32) -> Pixmap {
 /// The README's top image: a group shot of seven devices, each a different shell with a pet
 /// at a different stage of life, egg to senior. The middle one is biggest and in front, and
 /// the rest step down in size towards the edges. Between them they show every antenna shape,
-/// button shape and corner style; every one of them has an antenna.
+/// button shape and corner style; every one of them has an antenna, and the one right of the
+/// middle has it on the right.
 fn hero(dir: &Path) {
     let preset = |name: &str| PRESETS.iter().find(|p| p.name == name).map(|p| p.look).unwrap();
-    // the purple design, with a bolt in its buttons' yellow instead of no antenna
-    let custom = Look { antenna: bytepet::look::Antenna::Bolt, ..showcase()[0] };
+    // the purple design, with a bolt in its buttons' yellow instead of no antenna, on the right
+    let custom =
+        Look { antenna: bytepet::look::Antenna::Bolt, antenna_side: bytepet::look::Side::Right, ..showcase()[0] };
     // left to right, a life from egg to senior; sizes rise to the middle and fall again
     let cast = [
         (preset("FLAME"), (Stage::Egg, "egg"), 0.40),

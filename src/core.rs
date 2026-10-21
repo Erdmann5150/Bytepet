@@ -16,9 +16,16 @@ use crate::{Button, Tune};
 
 pub const SAVE_EVERY: f64 = 20.0;
 /// Seconds without a press before a menu left open goes back to the home screen.
-pub const MENU_TIMEOUT: f64 = 60.0;
+pub const MENU_TIMEOUT: f64 = 10.0;
 /// Seconds without a press before the home screen's icon cursor goes out.
-pub const SELECT_TIMEOUT: f64 = 30.0;
+pub const SELECT_TIMEOUT: f64 = 10.0;
+/// How long the device shakes when the pet calls, in seconds.
+pub const SHAKE_SECS: f64 = 0.6;
+/// How far it shakes each way, in design units. The window's shape leaves the shell a little
+/// more room than this (see `desktop::shape`).
+pub const SHAKE_REACH: f64 = 2.0;
+/// How many times a second it shakes back and forth.
+const SHAKE_HZ: f64 = 11.0;
 
 pub struct Core {
     pub content: Content,
@@ -37,6 +44,8 @@ pub struct Core {
     unlight: Option<f64>,
     /// Real seconds since the last button, key, click or scroll (see [`MENU_TIMEOUT`]).
     idle: f64,
+    /// Seconds left of the shake that goes with the call beep.
+    shake: f64,
     pending: VecDeque<Event>,
     sfx: Vec<Tune>,
     notices: Vec<Event>,
@@ -106,6 +115,7 @@ impl Core {
             menu_held: [false; 3],
             unlight: None,
             idle: 0.0,
+            shake: 0.0,
             pending: VecDeque::new(),
             sfx: Vec::new(),
             notices: Vec::new(),
@@ -403,7 +413,13 @@ impl Core {
             }
             self.collect_events(false);
         }
+        let heard = self.sfx.len();
         self.with_top(|s, cx| s.update(cx, dt));
+        // the device shakes with the call beep, so a call shows even with the sound off
+        self.shake = (self.shake - dt).max(0.0);
+        if self.sfx[heard..].contains(&Tune::Call) {
+            self.shake = SHAKE_SECS;
+        }
         let n = self.stack.len();
         if n >= 2 && self.stack[n - 1].see_through() {
             self.stack[n - 2].animate(dt);
@@ -431,6 +447,16 @@ impl Core {
             self.save_timer = 0.0;
             self.save();
         }
+    }
+
+    /// How far the device is shaken sideways right now, in design units: a quick buzz that
+    /// dies away.
+    pub fn shake_offset(&self) -> f32 {
+        if self.shake <= 0.0 {
+            return 0.0;
+        }
+        let t = SHAKE_SECS - self.shake;
+        (SHAKE_REACH * (t * SHAKE_HZ * std::f64::consts::TAU).sin() * (self.shake / SHAKE_SECS)) as f32
     }
 
     /// Left alone, the device goes back to its home screen like the real thing: an open menu
