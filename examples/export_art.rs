@@ -78,24 +78,29 @@ fn game_shot(dir: &Path, name: &str, g: Box<dyn games::MiniGame>, frames: usize,
     r.lcd(dir, &format!("game_{name}"));
 }
 
-/// The README's top image: six devices in a row, each a different shell with a pet at a
-/// different stage of life, egg to senior, some of them up to something.
+/// The README's top image: a group shot of seven devices, each a different shell with a pet
+/// at a different stage of life, egg to senior. The middle one is biggest and in front, and
+/// the rest step down in size towards the edges, each tucked slightly behind its neighbour.
 fn hero(dir: &Path) {
     use bytepet::look::{Antenna, ButtonShape, Lcd, Pattern, PRESETS};
     let preset = |name: &str| PRESETS.iter().find(|p| p.name == name).map(|p| p.look).unwrap();
-    // a made-over DONUT, to show off the customiser
-    let mut custom = preset("DONUT");
-    custom.button_shape = ButtonShape::Star;
-    custom.antenna = Antenna::Bolt;
-    custom.lcd = Lcd::Gray;
+    // a made-over GRAPE, to show off the customiser
+    let mut custom = preset("GRAPE");
     custom.pattern = Pattern::Stripes;
+    custom.button_shape = ButtonShape::Star;
+    custom.buttons = Some(bytepet::look::PALETTE[3].1); // yellow
+    custom.antenna = Antenna::Bolt;
+    custom.antenna_color = custom.buttons;
+    custom.lcd = Lcd::Gray;
+    // left to right, a life from egg to senior; sizes rise to the middle and fall again
     let cast = [
-        (preset("FLAME"), Stage::Egg, "egg", 0.52),
-        (preset("SWEET"), Stage::Baby, "baby", 0.62),
-        (preset("MINT"), Stage::Child, "child_a", 0.52),
-        (preset("COSMIC"), Stage::Teen, "teen_g", 0.62),
-        (custom, Stage::Adult, "s_p", 0.52),
-        (preset("RETRO"), Stage::Senior, "senior", 0.62),
+        (preset("FLAME"), Stage::Egg, "egg", 0.40),
+        (preset("SWEET"), Stage::Baby, "baby", 0.48),
+        (preset("MINT"), Stage::Child, "child_a", 0.56),
+        (preset("COSMIC"), Stage::Teen, "teen_g", 0.66),
+        (custom, Stage::Adult, "s_p", 0.56),
+        (preset("ZEBRA"), Stage::Adult, "h_a", 0.48),
+        (preset("RETRO"), Stage::Senior, "senior", 0.40),
     ];
     let mut devices = Vec::new();
     for (i, (look, stage, character, scale)) in cast.into_iter().enumerate() {
@@ -112,16 +117,25 @@ fn hero(dir: &Path) {
         r.core.shade = r.core.lcd.buf.map(|v| v as f32);
         devices.push(Renderer::new().render(&r.core, scale, 1.0, r.wall));
     }
-    let gap = 10;
-    let w = devices.iter().map(|d| d.width()).sum::<u32>() + gap * (devices.len() as u32 - 1);
+    // neighbours overlap by a fifth of the smaller one, all centred on one line
+    let overlap = |a: &tiny_skia::Pixmap, b: &tiny_skia::Pixmap| (a.width().min(b.width()) as f32 * 0.2) as u32;
+    let mut xs = vec![0u32];
+    for pair in devices.windows(2) {
+        let x = xs.last().unwrap() + pair[0].width() - overlap(&pair[0], &pair[1]);
+        xs.push(x);
+    }
+    let w = xs.last().unwrap() + devices.last().unwrap().width();
     let h = devices.iter().map(|d| d.height()).max().unwrap();
     let mut out = tiny_skia::Pixmap::new(w, h).unwrap();
-    let mut x = 0;
-    for d in &devices {
-        // big and small take turns, standing on the same line
-        let y = (h - d.height()) as i32;
-        out.draw_pixmap(x, y, d.as_ref(), &tiny_skia::PixmapPaint::default(), tiny_skia::Transform::identity(), None);
-        x += (d.width() + gap) as i32;
+    // from the edges in, so each one stands in front of the smaller ones beside it
+    let mid = devices.len() / 2;
+    let mut order: Vec<usize> = (0..devices.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(i.abs_diff(mid)));
+    for i in order {
+        let d = &devices[i];
+        let y = ((h - d.height()) / 2) as i32;
+        let paint = tiny_skia::PixmapPaint::default();
+        out.draw_pixmap(xs[i] as i32, y, d.as_ref(), &paint, tiny_skia::Transform::identity(), None);
     }
     out.save_png(dir.join("hero.png")).unwrap();
 }
