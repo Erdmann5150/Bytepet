@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use bytepet::content::Content;
+use bytepet::core::title_case;
 use bytepet::sim::{CallReason, Event, Game};
 
 const GAP: Duration = Duration::from_secs(120);
@@ -70,16 +71,4 @@ fn show(title: String, body: String) {
 /// A one-off notification (startup problems), regardless of the per-kind rate limit.
 pub fn plain(title: &str, body: &str) {
     show(title.to_string(), body.to_string());
-}
-
-fn title_case(s: &str) -> String {
-    let mut out = String::new();
-    for (i, ch) in s.chars().enumerate() {
-        if i == 0 {
-            out.extend(ch.to_uppercase());
-        } else {
-            out.extend(ch.to_lowercase());
-        }
-    }
-    out
 }

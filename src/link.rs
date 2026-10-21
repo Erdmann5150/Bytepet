@@ -3,8 +3,11 @@
 //! Flow: one side HOSTs, the other JOINs (found automatically, or typed IP). On connecting, the
 //! joiner shows a 4-digit code and sends it; the host shows the same code and must press B to
 //! accept, so nobody else on the network can link to you unasked. Both sides check the
-//! protocol version. The host then chooses VISIT, GAME, GIFT or MARRY.
+//! protocol version. Then the two take turns, the host first: whoever's turn it is chooses
+//! VISIT, GAME, GIFT or MARRY, the other waits, and once it's done the turn passes over. Either
+//! side can leave with C; a wedding ends the link.
 
+use std::collections::VecDeque;
 use std::time::Instant;
 
 use serde_json::{json, Value};
@@ -41,7 +44,9 @@ enum State {
     Approve,
     /// Guest: showing our code, waiting for the host to accept.
     AwaitAccept,
+    /// Our turn: choosing what to do.
     Action,
+    /// Their turn.
     Wait,
     Visit,
     AwaitScore,
@@ -61,6 +66,10 @@ pub struct LinkScreen {
     code: String,
     peer: Option<Peer>,
     accepted: bool,
+    /// We choose the next action; the other side waits.
+    my_turn: bool,
+    /// Network events not handled yet: some must wait for a visit to end (see `deferred`).
+    inbox: VecDeque<NetEvent>,
     hosts: Vec<Found>,
     ip_text: String,
     my_ip: String,
@@ -106,6 +115,8 @@ impl LinkScreen {
             code: String::new(),
             peer: None,
             accepted: false,
+            my_turn: false,
+            inbox: VecDeque::new(),
             hosts: Vec::new(),
             ip_text: String::new(),
             my_ip: local_ip(),
@@ -152,6 +163,43 @@ impl LinkScreen {
         self.finish(vec![(a.into(), b.into())], tune)
     }
 
+    /// An action is over: show how it went, and the turn passes to the other side. Both sides
+    /// call this once per action, so they stay in step.
+    fn next_turn(&mut self, pages: Vec<(String, String)>, tune: Option<Tune>) -> Tr {
+        self.my_turn = !self.my_turn;
+        self.set(if self.my_turn { State::Action } else { State::Wait });
+        if pages.is_empty() {
+            return Tr::None;
+        }
+        let mut m = Message::new(pages);
+        if let Some(t) = tune {
+            m = m.with_sound(t);
+        }
+        Tr::Push(boxed(m))
+    }
+
+    /// The peer can finish a visit first and send its next move (or leave) while ours is still
+    /// on screen; those wait for ours to end.
+    fn deferred(&self, e: &NetEvent) -> bool {
+        self.state == State::Visit && matches!(e, NetEvent::Msg(_) | NetEvent::Closed)
+    }
+
+    /// Both scores of a versus game are in: the result, and the next turn.
+    fn scores(&mut self, cx: &mut Ctx) -> Tr {
+        let (Some(a), Some(b)) = (self.my_score, self.peer_score) else { return Tr::None };
+        self.befriend(cx);
+        let score = format!("{a}-{b}");
+        let (line, tune) = if a > b {
+            cx.game.pet.happy = (cx.game.pet.happy + 1).min(4);
+            ("YOU WIN!", Tune::Win)
+        } else if a < b {
+            ("YOU LOSE", Tune::Lose)
+        } else {
+            ("DRAW", Tune::Ok)
+        };
+        self.next_turn(vec![(line.into(), score)], Some(tune))
+    }
+
     fn hello(&self, cx: &Ctx) -> Value {
         let p = &cx.game.pet;
         let c = cx.content;
@@ -187,7 +235,7 @@ impl LinkScreen {
         Tr::Push(boxed(GameHost::new(kind.make(), seed)))
     }
 
-    fn host_action(&mut self, cx: &mut Ctx, act: &str) -> Tr {
+    fn action(&mut self, cx: &mut Ctx, act: &str) -> Tr {
         let c = cx.content;
         match act {
             "VISIT" => {
@@ -300,6 +348,7 @@ impl LinkScreen {
             }
             "accept" if !self.host => {
                 self.accepted = true;
+                self.my_turn = false;
                 cx.play(Tune::Ok);
                 if self.peer.is_some() {
                     self.set(State::Wait);
@@ -314,21 +363,19 @@ impl LinkScreen {
                     self.fin("LINK", "ENDED", None)
                 }
             }
-            "visit" if !self.host && self.state == State::Wait => {
+            "visit" if self.their_move() => {
                 self.set(State::Visit);
                 Tr::None
             }
-            "game" if !self.host && self.state == State::Wait => {
-                match VersusGame::from_id(m["kind"].as_str().unwrap_or("")) {
-                    Some(kind) => self.start_game(kind, m["seed"].as_u64().unwrap_or(1)),
-                    None => self.fin("UNKNOWN", "GAME", Some(Tune::No)),
-                }
-            }
+            "game" if self.their_move() => match VersusGame::from_id(m["kind"].as_str().unwrap_or("")) {
+                Some(kind) => self.start_game(kind, m["seed"].as_u64().unwrap_or(1)),
+                None => self.fin("UNKNOWN", "GAME", Some(Tune::No)),
+            },
             "score" if self.state == State::AwaitScore => {
                 self.peer_score = Some(m["v"].as_u64().unwrap_or(0).min(1000) as u32);
-                Tr::None
+                self.scores(cx)
             }
-            "gift" if !self.host && self.state == State::Wait => {
+            "gift" if self.their_move() => {
                 let what = if let Some(gp) = m["gp"].as_i64() {
                     let gp = gp.clamp(0, 1000);
                     cx.game.gp += gp;
@@ -342,14 +389,14 @@ impl LinkScreen {
                     item.to_string()
                 };
                 let lvl = self.befriend(cx);
-                self.finish(vec![("GOT".into(), what), ("FRIEND".into(), lvl)], Some(Tune::Win))
+                self.next_turn(vec![("GOT".into(), what), ("FRIEND".into(), lvl)], Some(Tune::Win))
             }
-            "propose" if !self.host && self.state == State::Wait => {
+            "propose" if self.their_move() => {
                 let senior_ok =
                     cx.game.pet.stage != Stage::Senior || self.peer.as_ref().map(|p| p.senior).unwrap_or(false);
                 if !(cx.game.can_marry(c) && self.soulmates(cx) && senior_ok) {
                     self.send(json!({"t": "answer", "yes": false}));
-                    return self.finish(
+                    return self.next_turn(
                         vec![("PROPOSAL".into(), String::new()), ("NOT".into(), "ELIGIBLE".into())],
                         Some(Tune::No),
                     );
@@ -362,11 +409,16 @@ impl LinkScreen {
                 if m["yes"].as_bool().unwrap_or(false) {
                     self.start_wedding(cx)
                 } else {
-                    self.fin("SAID NO", "", Some(Tune::Lose))
+                    self.next_turn(vec![("SAID NO".into(), String::new())], Some(Tune::Lose))
                 }
             }
             _ => Tr::None,
         }
+    }
+
+    /// Waiting on the other side, which may make its move.
+    fn their_move(&self) -> bool {
+        !self.my_turn && self.state == State::Wait
     }
 
     fn start_wedding(&mut self, cx: &mut Ctx) -> Tr {
@@ -459,6 +511,8 @@ impl Screen for LinkScreen {
             (State::Approve, Button::B) => {
                 cx.play(Tune::Ok);
                 self.send(json!({"t": "accept"}));
+                // the host goes first
+                self.my_turn = true;
                 self.set(State::Action);
                 Tr::None
             }
@@ -474,7 +528,7 @@ impl Screen for LinkScreen {
             (State::Action, Button::B) => {
                 cx.play(Tune::Click);
                 let act = ACTIONS[self.k];
-                self.host_action(cx, act)
+                self.action(cx, act)
             }
             (State::Action, Button::C) => self.fin("BYE BYE", "", None),
             (State::Visit, _) => {
@@ -525,8 +579,15 @@ impl Screen for LinkScreen {
 
     fn update(&mut self, cx: &mut Ctx, dt: f64) -> Tr {
         self.t += dt;
-        let events = self.link.as_ref().map(|l| l.poll()).unwrap_or_default();
-        for e in events {
+        if let Some(l) = &self.link {
+            self.inbox.extend(l.poll());
+        }
+        // one at a time: an event that changes screens leaves the rest for when we're back
+        while let Some(e) = self.inbox.front() {
+            if self.deferred(e) {
+                break;
+            }
+            let Some(e) = self.inbox.pop_front() else { break };
             let tr = self.handle(cx, e);
             if !matches!(tr, Tr::None) {
                 return tr;
@@ -536,24 +597,10 @@ impl Screen for LinkScreen {
         match self.state {
             State::Visit if self.t > 4.0 => {
                 let lvl = self.befriend(cx);
-                self.finish(vec![("FRIEND".into(), lvl)], Some(Tune::Ok))
+                self.next_turn(vec![("FRIEND".into(), lvl)], Some(Tune::Ok))
             }
-            State::AwaitScore => {
-                if let (Some(a), Some(b)) = (self.my_score, self.peer_score) {
-                    self.befriend(cx);
-                    if a > b {
-                        cx.game.pet.happy = (cx.game.pet.happy + 1).min(4);
-                        self.fin("YOU WIN!", &format!("{a}-{b}"), Some(Tune::Win))
-                    } else if a < b {
-                        self.fin("YOU LOSE", &format!("{a}-{b}"), Some(Tune::Lose))
-                    } else {
-                        self.fin("DRAW", &format!("{a}-{b}"), Some(Tune::Ok))
-                    }
-                } else if self.my_score.is_some() && waited > 60.0 {
-                    self.fin("NO SCORE", "FROM PEER", Some(Tune::No))
-                } else {
-                    Tr::None
-                }
+            State::AwaitScore if self.my_score.is_some() && waited > 60.0 => {
+                self.fin("NO SCORE", "FROM PEER", Some(Tune::No))
             }
             State::Scanning if waited > 8.0 => self.fin("NOBODY", "FOUND", Some(Tune::No)),
             State::Hosting if waited > 300.0 => self.fin("TIMED", "OUT", Some(Tune::No)),
@@ -574,7 +621,7 @@ impl Screen for LinkScreen {
                     self.since = Instant::now();
                     self.send(json!({"t": "score", "v": n}));
                 }
-                Tr::None
+                self.scores(cx)
             }
             State::GiftPick => match r {
                 Res::Pick(i) if i < self.gift_ids.len() => {
@@ -592,7 +639,7 @@ impl Screen for LinkScreen {
                         self.send(json!({"t": "gift", "item": id}));
                     }
                     let lvl = self.befriend(cx);
-                    self.finish(vec![("SENT".into(), id), ("FRIEND".into(), lvl)], Some(Tune::Ok))
+                    self.next_turn(vec![("SENT".into(), id), ("FRIEND".into(), lvl)], Some(Tune::Ok))
                 }
                 _ => {
                     self.set(State::Action);
@@ -606,7 +653,7 @@ impl Screen for LinkScreen {
                 }
                 Res::Yes(false) => {
                     self.send(json!({"t": "answer", "yes": false}));
-                    self.fin("SAID NO", "", None)
+                    self.next_turn(vec![], None)
                 }
                 _ => Tr::None,
             },
@@ -680,7 +727,7 @@ impl Screen for LinkScreen {
             State::Wait => {
                 lcd.text("LINKED!", 0, 1);
                 if let Some(p) = &self.peer {
-                    lcd.line(&p.name, 9, self.t, false);
+                    lcd.line(&format!("{} TO PICK", p.name), 9, self.t, false);
                 }
             }
             State::Visit => {

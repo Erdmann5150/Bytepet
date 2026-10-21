@@ -9,7 +9,7 @@ between devices over your LAN instead of infrared.
 All characters, names and art are original. This is a fan-made homage to that style of
 gameplay. It is not affiliated with Bandai or the Tamagotchi brand.
 
-![Bytepet](docs/screenshot.png)
+![Bytepets in a range of shells, from egg to senior](docs/readme/hero.png)
 
 ## Install
 
@@ -45,7 +45,7 @@ Bytepet opens as a floating, egg-shaped device in the bottom-right corner. Click
 empty space around the egg pass through to whatever is behind it.
 
 - **Drag** the shell to move it. Bytepet remembers where you left it.
-- **Settings:** the everyday ones (speed, sound, shell) are in Town > SETUP, and **MORE** there
+- **Settings:** the everyday ones (speed, sound, shell, bedtime) are in Town > SETUP, and **MORE** there
   opens all of them: size, shell, time speed, sound volume, always on top, notifications, launch at login, help, hide and quit. They open on the
   device's own screen, which switches to a finer dot grid to show them, so the rest of the device
   stays in sight while you change it. Work them with the device's buttons: **A** for the next row,
@@ -56,8 +56,13 @@ empty space around the egg pass through to whatever is behind it.
   (colour, pattern, pattern colour, shine), buttons (colour, shape, letters), antenna (shape,
   colour, key ring), screen (faceplate, rim, frame, corners, LCD colour) and icons (icon colour,
   the selected icon, the alert icon and the BYTEPET text). Each part changes on its own as you
-  watch, and RANDOM changes every part at once.
-- **Tray or menu-bar icon:** click it to show or hide the pet. Its menu has *Show / hide*,
+  watch, and RANDOM changes every part at once (asking first if your design isn't saved).
+  **THEMES** keeps up to 9 designs of your own: SAVE the one you're wearing, then pick
+  THEME 1, THEME 2 and so on to WEAR it again or DELETE it.
+- **Left alone,** a menu or the settings go back to the home screen after a minute, and a
+  highlighted icon goes out after 30 seconds. Games, animations and links are never cut short.
+- **Tray or menu-bar icon:** hover over it to see how your pet is doing (its hearts and what
+  it needs), and click it to show or hide the pet. Its menu has *Show / hide*,
   *Settings* (brings the pet forward with its settings open) and *Quit*. On Windows and macOS
   Bytepet has no taskbar or Dock button, so the tray icon is how you bring it back after hiding it.
 - **Notifications** tell you when your pet calls, gets sick, hatches, grows up, gets mail or
@@ -103,7 +108,13 @@ shell designs. When the game asks for a name or an IP address, type it on your k
 Time runs in real time and follows your computer's clock, so the pet sleeps at night. Time
 also keeps running while Bytepet is closed, up to 14 days. To pause instead, set
 *Town → Setup → WHEN OFF* to PAUSE. Speeds of 10×, 60× and 600× are for trying things out; while
-one is on, a badge above the screen shows it.
+one is on, a badge above the screen shows it. The time speed never moves bedtime.
+
+If you sleep by day, *Town → Setup → BEDTIME* moves your pet's whole day by up to 12 hours
+either way: at +8H, a child that would sleep from 20:00 to 08:00 sleeps from 04:00 to 16:00.
+
+The alert icon lights whenever your pet needs something: a call, poop to clean
+up, medicine, an empty heart, or the lights left on while it sleeps.
 
 | Stage | Length | Notes |
 |---|---|---|
@@ -148,12 +159,16 @@ Both computers must be on the same network.
    and type the address shown on the host's screen.
 3. Both screens show the same 4-digit code. If it matches, press **B on the host** to
    accept, or C to refuse. Nothing is exchanged before that.
-4. The host picks one of four actions:
+4. You take turns, the host first. Whoever's turn it is picks one of four actions, and when
+   it's done the turn passes to the other side:
    - **VISIT:** the pets meet and their friendship goes up.
    - **GAME:** EATS, FLAGS or BUMP. Both sides play the same round and the scores are compared.
    - **GIFT:** send an item or 100 GP.
-   - **MARRY:** needs SOULMATE friendship (10 link-ups) and two eligible adults, or two
-     seniors. Both players get the next-generation egg.
+   - **MARRY:** needs SOULMATE friendship (10 visits, games or gifts) and two eligible adults,
+     or two seniors. Both players get the next-generation egg, and the link ends.
+
+   Either side can leave with C. Both need this version or newer: an older Bytepet says
+   OTHER VERSION.
 
 Linking uses TCP port 41975 and UDP port 41976. Windows and macOS ask whether to allow
 network access the first time you host: allow it on private networks. If 41975 is busy,
@@ -169,10 +184,11 @@ with the port. To try it on one computer, run two copies with different saves:
 | macOS | `~/Library/Application Support/Bytepet/save.json` |
 | Linux | `~/.local/share/bytepet/save.json` (or under `$XDG_DATA_HOME`) |
 
-`bytepet --paths` prints the exact locations. The game saves every 20 seconds and on exit,
-and a crash can't leave the file half-written. If the save is damaged, it's renamed to
-`save.json.corrupt` and a new egg starts. A save from a newer version is played but never
-overwritten.
+`bytepet --paths` prints the exact locations. The game saves every 20 seconds and on exit.
+Each save is flushed to disk before it replaces the last one, so neither a crash nor a power
+cut can leave it half-written, and the save before it is kept as `save.json.bak`. If the save
+is damaged, it's renamed to `save.json.corrupt` and Bytepet carries on from the backup (or,
+without one, a new egg starts). A save from a newer version is played but never overwritten.
 
 ## Modding
 
@@ -201,7 +217,7 @@ bytepet [--save FILE] [--speed 1|10|60|600] [--new] [--windowed]
 
 ## Building from source
 
-You need Rust 1.80 or newer from [rustup.rs](https://rustup.rs). On Linux you also need the
+You need Rust 1.89 or newer from [rustup.rs](https://rustup.rs). On Linux you also need the
 ALSA headers: `sudo apt install libasound2-dev pkg-config` (Debian, Ubuntu) or
 `sudo dnf install alsa-lib-devel` (Fedora).
 

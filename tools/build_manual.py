@@ -337,11 +337,13 @@ story += [P("Living on your desktop", "h2"),
             "sight. Use the device's buttons: <b>A</b> moves to the next row, <b>B</b> changes or opens it and "
             "<b>C</b> goes back. With the mouse, <b>scroll</b> to pick a row, <b>click</b> to change or open it "
             "and <b>right-click</b> to go back. On the keyboard, the left and right arrows step a setting either "
-            "way:"),
+            "way. Left alone, a menu or the settings go back to the home screen after a minute, and a lit icon "
+            "goes out after 30 seconds; games, animations and links are never cut short:"),
           menu, Spacer(1, 6), sizes, Spacer(1, 4),
           tip("On Windows and macOS, Bytepet doesn't appear in the taskbar or Dock. Click its tray icon "
-              "(notification area or menu bar) to show or hide it; right-click it for Settings and Quit. Starting "
-              "Bytepet again while it's running also brings it back.", "NOTE"),
+              "(notification area or menu bar) to show or hide it; right-click it for Settings and Quit. Hover "
+              "over it to see your pet's hearts and what it needs without opening it. Starting Bytepet again "
+              "while it's running also brings it back.", "NOTE"),
           P("Linux notes", "h2"),
           B("On Wayland desktops (Fedora's and Ubuntu's default), apps can't keep themselves on top, pick where "
             "they open or let clicks through. Bytepet therefore runs through XWayland, where all three work. Set "
@@ -378,8 +380,11 @@ story += [strip, Spacer(1, 8),
                  for s in ("child", "teen", "adult", "senior")],
                 [1.4 * inch, 1.4 * inch, 1.4 * inch]),
           Spacer(1, 6),
-          tip("Faster time speeds only make your pet age faster. Bedtimes always follow your real clock, so "
-              "switching back to 1× needs no clean-up.")]
+          P("If you sleep by day (night shifts, say), <b>Town → SETUP → BEDTIME</b> moves the whole schedule "
+            "by up to 12 hours either way. At +8H, a child that would sleep from 20:00 to 08:00 sleeps from "
+            "04:00 to 16:00 instead."),
+          tip("Faster time speeds only make your pet age faster. Bedtimes always follow your real clock (moved "
+              "by BEDTIME, if you set it), so switching back to 1× needs no clean-up.")]
 
 # 4 care
 story += section(4, "Daily care", "A well-cared-for pet grows into the best adults. Neglect leads to care "
@@ -562,7 +567,8 @@ story += [screens([("lcd_town", "The Town menu"), ("lcd_clock", "B on the main s
                  ["ALBUM", "Every past pet: its form, generation, age, job, partner and how its story ended."],
                  ["SETUP", "SPEED (1×, 10×, 60×, 600×), SOUND (OFF or a volume), SHELL (steps through the "
                            "twelve designs), "
-                           "WHEN OFF (RUNS or PAUSE: whether time passes while Bytepet is closed), MORE (opens the "
+                           "WHEN OFF (RUNS or PAUSE: whether time passes while Bytepet is closed), BEDTIME (moves "
+                           "your pet's sleep up to 12 hours later or earlier, for night owls), MORE (opens the "
                            "full settings) and NEW EGG (start over)."]],
                 [1.1 * inch, CW - 1.1 * inch]),
           Spacer(1, 8)]
@@ -588,9 +594,11 @@ custom = Table([[img("menu_shell", 1.9 * inch),
                                    "around the screen), CORNERS (Round, Soft or Square) and LCD (Classic, Gray, "
                                    "Blue, Amber or Pink)."],
                         ["ICONS", "ICONS (the menu icons), SELECT (the selected icon), ALERT (the attention "
-                                  "icon while your pet calls) and NAME (the BYTEPET text). AUTO keeps the "
+                                  "icon, lit whenever your pet needs something) and NAME (the BYTEPET text). AUTO keeps the "
                                   "usual colours."],
-                        ["RANDOM", "A surprise: every part at once."]],
+                        ["THEMES", "Up to 9 designs of your own: SAVE the one you're wearing, then pick a "
+                                   "THEME to WEAR it again or DELETE it."],
+                        ["RANDOM", "A surprise: every part at once. If your design isn't saved, it asks first."]],
                        [0.9 * inch, CW - 2.2 * inch - 0.9 * inch])]],
                colWidths=[2.2 * inch, CW - 2.2 * inch])
 custom.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
@@ -617,7 +625,8 @@ story += [P("Connecting", "h2"),
           B("Both screens now show the same 4-digit <b>CODE</b>. If they match, the <b>host presses B</b> to "
             "accept (C refuses); the other screen waits until then. A stranger's device on the same network "
             "can't link without the host agreeing."),
-          B("Once paired, the <b>host</b> chooses what to do. Each link does one thing and then disconnects."),
+          B("Once paired, you take turns, the <b>host</b> first: whoever's turn it is chooses what to do, and "
+            "when it's done the turn passes over. Either side can leave with <b>C</b>; a wedding ends the link."),
           screens([("lcd_link_host", "Hosting: waiting with its address"),
                    ("lcd_link_code", "The host checks the pairing code"),
                    ("lcd_link_visit", "A visit")]),
@@ -638,6 +647,8 @@ story += [P("Connecting", "h2"),
                   "A bar sweeps back and forth. Press B when it's inside the box. Five tries; closer scores more."]],
                 [1.45 * inch, 0.8 * inch, CW - 2.25 * inch]),
           P("Friendship levels", "h2"),
+          P("Every visit, versus game and gift counts as a link-up, so one link session can count several "
+            "times."),
           table([["Link-ups", "Level"]] + [[str(f["links"]), f["name"].title()] for f in reversed(FRIENDS)],
                 [1.2 * inch, 2.2 * inch]),
           Spacer(1, 6),
@@ -693,9 +704,10 @@ story += [table([["Situation", "What to do"],
                  ["Linux", code("~/.local/share/bytepet/save.json")]],
                 [1.1 * inch, CW - 1.1 * inch]),
           P("The file also remembers the widget's position, size and settings. The game saves every 20 seconds and "
-            "when you close it, writing the file in one step so a crash can't leave it half-written. If a save is "
-            "ever damaged, it's kept as %s and a new egg starts; you get a notification saying so."
-            % code("save.json.corrupt")),
+            "when you close it. Each save is flushed to disk before it replaces the last one, so neither a crash "
+            "nor a power cut can leave it half-written, and the save before it is kept as %s. If a save is ever "
+            "damaged, it's kept as %s and Bytepet carries on from the backup (or, without one, a new egg "
+            "starts); you get a notification saying so." % (code("save.json.bak"), code("save.json.corrupt"))),
           P("Command-line options", "h2"),
           table([["Option", "Meaning"],
                  [code("--save FILE"), "Use a different save file (one running copy per file)"],
@@ -890,7 +902,8 @@ def quick_story():
         stage_rows.append([st.title(), lasts, "%s hunger · %s happy" % (mins(STAGES[st]["hunger"]),
                                                                        mins(STAGES[st]["happy"])), sleep(st)])
     s.append(block("Life stages", qtable(stage_rows, [0.16, 0.25, 0.35, 0.24]),
-                   Spacer(1, 3), qp("Bedtimes follow your computer's clock at every time speed. Asleep, nothing "
+                   Spacer(1, 3), qp("Bedtimes follow your computer's clock at every time speed; "
+                                    "<b>Town → SETUP → BEDTIME</b> moves them up to 12 hours. Asleep, nothing "
                                     "drains and no poop or mail arrives.")))
 
     child_good, child_rough = find("child", grade="a"), find("child", grade="b")
@@ -953,8 +966,8 @@ def quick_story():
                    qb("One computer picks <b>Link → HOST</b>; the other <b>Link → JOIN</b> (or <b>IP</b> to type the "
                       "address). Same network only."),
                    qb("Both screens show a 4-digit code. If it matches, the host presses <b>B</b>."),
-                   qb("The host picks <b>VISIT</b>, <b>GAME</b> (EATS, FLAGS or BUMP), <b>GIFT</b> or <b>MARRY</b>. "
-                      "Each link does one thing, then disconnects."),
+                   qb("Take turns, host first: pick <b>VISIT</b>, <b>GAME</b> (EATS, FLAGS or BUMP), <b>GIFT</b> or <b>MARRY</b>. "
+                      "Then it's the other side's turn. <b>C</b> leaves."),
                    Spacer(1, 2),
                    qtable([["Link game", "How to win"],
                            ["<b>EATS</b>", "Mash B for 6 seconds"],
@@ -975,9 +988,9 @@ def quick_story():
                    qb("Two seniors make a rare egg, which grows into %s." % name(rare))))
 
     s.append(block("Settings",
-                   qp("Town → SETUP → MORE, or Settings on the tray icon: <b>size</b>, <b>shell</b>, <b>time speed</b> "
-                      "(1×, 10×, 60×, 600×), <b>sound</b>, <b>always on top</b>, <b>notifications</b>, "
-                      "<b>launch at login</b>, help, hide and quit."),
+                   qp("Town → SETUP → MORE, or Settings on the tray icon: <b>size</b>, <b>shell</b> (with up to 9 "
+                      "saved <b>themes</b>), <b>time speed</b> (1×, 10×, 60×, 600×), <b>sound</b>, "
+                      "<b>always on top</b>, <b>notifications</b>, <b>launch at login</b>, help, hide and quit."),
                    qp("Time keeps running while Bytepet is closed (up to 14 days). To pause it instead, set "
                       "<b>Town → SETUP → WHEN OFF</b> to PAUSE.")))
 
@@ -986,8 +999,8 @@ def quick_story():
                            ["macOS", code("~/Library/Application Support/Bytepet/save.json")],
                            ["Linux", code("~/.local/share/bytepet/save.json")]],
                           [0.22, 0.78], header=False),
-                   Spacer(1, 3), qp("Saved every 20 seconds and on exit. %s prints the exact path."
-                                    % code("bytepet --paths"))))
+                   Spacer(1, 3), qp("Saved every 20 seconds and on exit, with the previous save kept as %s. "
+                                    "%s prints the exact path." % (code("save.json.bak"), code("bytepet --paths")))))
     return s
 
 

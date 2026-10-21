@@ -126,6 +126,25 @@ fn link_visit_game_gift_and_marriage() {
     assert!(wait(&mut a, &mut b, |a, b| a.top() == "Message" && b.top() == "Message", 600));
     assert_eq!(a.core.game.items.get("CAKE"), Some(&1));
     assert_eq!(b.core.game.items.get("CAKE"), Some(&1));
+    // the link stays up and the turn passes: now the guest gives one back
+    a.tap(Button::C);
+    b.tap(Button::C);
+    assert!(wait(&mut a, &mut b, |a, b| a.top() == "Link" && b.top() == "Link", 60));
+    b.taps("AA");
+    b.tap(Button::B);
+    assert_eq!(b.top(), "Pick");
+    b.tap(Button::B);
+    assert!(wait(&mut a, &mut b, |a, b| a.top() == "Message" && b.top() == "Message", 600));
+    assert_eq!(a.core.game.items.get("CAKE"), Some(&2));
+    assert_eq!(b.core.game.items.get("CAKE"), None);
+    // and back to the host, who visits
+    a.tap(Button::C);
+    b.tap(Button::C);
+    assert!(wait(&mut a, &mut b, |a, b| a.top() == "Link" && b.top() == "Link", 60));
+    let before = a.core.game.friend_count(&idb);
+    a.tap(Button::B);
+    assert!(wait(&mut a, &mut b, |a, b| a.top() == "Message" && b.top() == "Message", 900));
+    assert_eq!(a.core.game.friend_count(&idb), before + 1);
     a.back_to_main();
     b.back_to_main();
 

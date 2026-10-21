@@ -93,6 +93,39 @@ pub struct Renderer {
     shell_cache: Option<(Look, u32, u32, Pixmap)>,
 }
 
+/// Everything [`Renderer::render`] draws from. When it hasn't changed since the last frame,
+/// neither has the picture, and the desktop shell skips drawing and uploading it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FrameKey {
+    scale: u32,
+    look: Look,
+    held: [bool; 3],
+    icons: [bool; 10],
+    page: Page,
+    /// The LCD's dot shades, or the settings' dots while they're open.
+    lcd: Vec<u32>,
+    menu: Vec<bool>,
+    status: String,
+    typing: bool,
+}
+
+impl FrameKey {
+    pub fn new(core: &Core, scale: f32, wall: f64) -> FrameKey {
+        let open = core.overlay.is_open();
+        FrameKey {
+            scale: scale.to_bits(),
+            look: core.game.settings.look,
+            held: core.held,
+            icons: core.icon_states(wall),
+            page: core.overlay.page,
+            lcd: if open { Vec::new() } else { core.shade.iter().map(|v| v.to_bits()).collect() },
+            menu: if open { overlay::dots(core) } else { Vec::new() },
+            status: core.status_tags(),
+            typing: core.wants_text(),
+        }
+    }
+}
+
 /// Window size in pixels for a given scale (window pixels per design unit).
 pub fn window_size(scale: f32) -> (u32, u32) {
     ((VIEW.2 * scale).round() as u32, (VIEW.3 * scale).round() as u32)

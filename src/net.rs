@@ -14,11 +14,15 @@ use serde_json::{json, Value};
 use socket2::{Domain, Protocol, Socket, Type};
 
 /// Protocol version. Bump it whenever messages change; both sides check it during pairing.
-pub const PROTO: u64 = 2;
+/// 3: both sides take turns choosing actions, and the link stays up between them.
+pub const PROTO: u64 = 3;
 pub const TCP_PORT: u16 = 41975;
 pub const BEACON_PORT: u16 = 41976;
 const MAGIC: &str = "bytepet";
 const MAX_LINE: usize = 16 * 1024;
+/// Longest a send may block the UI thread. Messages are tiny, so a write only waits when the
+/// other side has stopped reading altogether (its machine froze or the network dropped).
+const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NetEvent {
@@ -192,6 +196,10 @@ impl Link {
         let mut guard = self.stream.lock().unwrap();
         if let Some(s) = guard.as_mut() {
             if s.write_all(line.as_bytes()).is_err() {
+                // timed out or broken: hang up, so later sends don't wait all over again
+                if let Some(s) = guard.take() {
+                    let _ = s.shutdown(std::net::Shutdown::Both);
+                }
                 let _ = self.tx.send(NetEvent::Closed);
             }
         }
@@ -248,6 +256,8 @@ fn attach(
 ) {
     let _ = s.set_nonblocking(false);
     let _ = s.set_nodelay(true);
+    // `Link::send` writes on the UI thread: a friend that stops reading mustn't freeze this pet
+    let _ = s.set_write_timeout(Some(WRITE_TIMEOUT));
     let Ok(reader) = s.try_clone() else {
         let _ = tx.send(NetEvent::Error("LINK FAIL".into()));
         return;
@@ -337,6 +347,32 @@ mod tests {
         assert_eq!(got, NetEvent::Msg(json!({"t": "hello", "n": 1})));
         host.close();
         assert!(wait_for(&guest, |e| *e == NetEvent::Closed, 5.0).is_some());
+    }
+
+    #[test]
+    fn a_peer_that_stops_reading_cannot_freeze_the_sender() {
+        let mut host = Link::new();
+        let port = host.host("ann").unwrap();
+        // connects, then never reads a byte
+        let _frozen = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        assert!(wait_for(&host, |e| *e == NetEvent::Connected, 5.0).is_some());
+        let big = json!({"t": "x", "pad": "x".repeat(64 * 1024)});
+        let mut closed = false;
+        // far more than any socket buffer holds
+        for _ in 0..4096 {
+            let t = Instant::now();
+            host.send(&big);
+            assert!(t.elapsed() < WRITE_TIMEOUT * 3, "a send blocked for {:?}", t.elapsed());
+            if host.poll().contains(&NetEvent::Closed) {
+                closed = true;
+                break;
+            }
+        }
+        assert!(closed, "the link never gave up on the frozen peer");
+        // and once given up on, sending is instant
+        let t = Instant::now();
+        host.send(&big);
+        assert!(t.elapsed() < Duration::from_millis(100));
     }
 
     #[test]
