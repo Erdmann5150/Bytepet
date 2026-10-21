@@ -11,7 +11,7 @@ use crate::core::Core;
 use crate::font::{for_each_dot, text_width};
 use crate::layout::*;
 use crate::lcd::{Lcd, H as LH, W as LW};
-use crate::look::{Antenna, ButtonShape, Corners, Look, Part, Pattern};
+use crate::look::{ButtonShape, Corners, Look, Part, Pattern};
 use crate::overlay::{self, Page, GRID_H, GRID_W};
 use crate::rng::Pcg32;
 use crate::sprite::Sprite;
@@ -300,22 +300,28 @@ fn paint_shell(pm: &mut Pixmap, look: &Look, scale: f32) {
     }
     let antenna = antenna_points(look.antenna);
     if !antenna.is_empty() {
+        // the stem runs from the charm's middle but only shows outside it, so it meets the
+        // outline cleanly and doesn't show through the see-through charm
+        let mut inside = Mask::new(pm.width(), pm.height()).expect("mask");
+        if let Some(path) = poly(&antenna) {
+            inside.fill_path(&path, FillRule::Winding, true, ts);
+        }
+        let mut outside = inside.clone();
+        outside.invert();
         let mut pb = PathBuilder::new();
-        pb.move_to(STAR.0 + 12.0, STAR.1 + 14.0);
-        pb.line_to(STAR.0 + 48.0, STAR.1 + 52.0);
-        stroke(pm, pb.finish(), rgba([200, 200, 210], 255), 6.0, ts);
+        pb.move_to(STEM.0, STEM.1);
+        pb.line_to(STEM.2, STEM.3);
+        if let Some(path) = pb.finish() {
+            let s = Stroke { width: 6.0, line_cap: LineCap::Round, ..Stroke::default() };
+            pm.stroke_path(&path, &paint(rgba([200, 200, 210], 255)), &s, ts, Some(&outside));
+        }
         let color = look.antenna_color.unwrap_or(lighten(base, 0.45));
         fill(pm, poly(&antenna), rgba(color, 215), ts, None);
         stroke(pm, poly(&antenna), Color::WHITE, 2.0, ts);
-        // a highlight: the outline shrunk towards its middle
-        let (mx, my) = if look.antenna == Antenna::Star {
-            STAR
-        } else {
-            let n = antenna.len() as f32;
-            antenna.iter().fold((0.0, 0.0), |(sx, sy), &(x, y)| (sx + x / n, sy + y / n))
-        };
+        // a highlight: the outline shrunk towards its middle, kept within the charm
+        let (mx, my) = centroid(&antenna);
         let inner: Vec<(f32, f32)> = antenna.iter().map(|&(x, y)| (x - 0.4 * (x - mx), y - 0.4 * (y - my))).collect();
-        fill(pm, poly(&inner), Color::from_rgba8(255, 255, 255, 70), ts, None);
+        fill(pm, poly(&inner), Color::from_rgba8(255, 255, 255, 70), ts, Some(&inside));
     }
 
     // the shell: dark rim, then a softly lit plastic body
