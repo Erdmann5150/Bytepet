@@ -1,14 +1,14 @@
 //! How the device looks: body, buttons, antenna and screen, each chosen on its own, plus the
 //! named presets the SHELL setting steps through.
 //!
-//! Every customisable part is a [`Field`] with a fixed list of options, so the settings menu,
-//! the tray menu and the save file all treat them the same way.
+//! Every customisable part is a [`Field`] with a fixed list of options, so the settings and
+//! the save file treat them all the same way.
 
 use serde::{Deserialize, Serialize};
 
 pub type Rgb = [u8; 3];
 
-/// The colours the menus offer, with names short enough for the settings panel.
+/// The colours the settings offer, with names short enough for the device's screen.
 pub const PALETTE: [(&str, Rgb); 20] = [
     ("PINK", [236, 72, 153]),
     ("RED", [220, 38, 38]),
@@ -470,29 +470,7 @@ impl Field {
         }
     }
 
-    /// The tray menu's name for it.
-    pub fn title(self) -> &'static str {
-        match self {
-            Field::Body | Field::Buttons | Field::AntennaColor => "Color",
-            Field::Pattern => "Pattern",
-            Field::Accent => "Pattern color",
-            Field::Gloss => "Shine",
-            Field::ButtonShape | Field::Antenna => "Shape",
-            Field::Letters => "A B C letters",
-            Field::Ring => "Key ring",
-            Field::Face => "Faceplate",
-            Field::Edge => "Faceplate rim",
-            Field::Frame => "Screen frame",
-            Field::Corners => "Corners",
-            Field::Lcd => "Screen color",
-            Field::Icons => "Icon color",
-            Field::Selected => "Selected icon",
-            Field::Alert => "Alert icon",
-            Field::Name => "BYTEPET text",
-        }
-    }
-
-    /// The label on the settings panel, within its part's page.
+    /// The label in the settings, on its part's page.
     pub fn label(self) -> &'static str {
         match self {
             Field::Body | Field::Buttons | Field::AntennaColor => "COLOR",

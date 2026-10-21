@@ -26,6 +26,8 @@ pub struct Core {
     pub ui: UiState,
     pub overlay: Overlay,
     pub held: [bool; 3],
+    /// Buttons pressed while the settings were open: their release isn't the game's.
+    menu_held: [bool; 3],
     pending: VecDeque<Event>,
     sfx: Vec<Tune>,
     notices: Vec<Event>,
@@ -79,6 +81,7 @@ impl Core {
             ui: UiState { sel: -1, ..UiState::default() },
             overlay: Overlay::default(),
             held: [false; 3],
+            menu_held: [false; 3],
             pending: VecDeque::new(),
             sfx: Vec::new(),
             notices: Vec::new(),
@@ -212,11 +215,21 @@ impl Core {
             return;
         }
         self.held[b.index()] = true;
+        // while the settings are open the buttons work them, not the game
+        if self.overlay.is_open() {
+            self.menu_held[b.index()] = true;
+            if let Some(cmd) = crate::overlay::button(self, b) {
+                self.overlay.push_cmd(cmd);
+            }
+            return;
+        }
         self.with_top(|s, cx| s.press(cx, b));
     }
 
     pub fn release(&mut self, b: Button) {
-        if self.held[b.index()] {
+        if std::mem::take(&mut self.menu_held[b.index()]) {
+            self.held[b.index()] = false;
+        } else if self.held[b.index()] {
             self.held[b.index()] = false;
             self.with_top(|s, cx| s.release(cx, b));
         }
@@ -280,6 +293,10 @@ impl Core {
     pub fn tap(&mut self, b: Button) {
         self.press(b);
         self.release(b);
+    }
+
+    pub fn play(&mut self, t: Tune) {
+        self.sfx.push(t);
     }
 
     pub fn toggle_mute(&mut self) {

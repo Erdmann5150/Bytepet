@@ -21,15 +21,13 @@ type Box4 = (i32, i32, i32, i32);
 /// What the window's shape depends on besides its size.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Outline {
-    /// The open menu (x, y, w, h in window pixels), which may reach past the shell.
-    pub panel: Option<(i32, i32, i32, i32)>,
     pub antenna: Antenna,
     pub ring: bool,
 }
 
 impl Outline {
-    pub fn new(look: &Look, panel: Option<(i32, i32, i32, i32)>) -> Outline {
-        Outline { panel, antenna: look.antenna, ring: look.ring }
+    pub fn new(look: &Look) -> Outline {
+        Outline { antenna: look.antenna, ring: look.ring }
     }
 }
 
@@ -91,7 +89,7 @@ pub fn apply(window: &Window, scale: f32, outline: &Outline) {
 fn windows_region(hwnd: isize, scale: f32, outline: &Outline) {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::Graphics::Gdi::{
-        CombineRgn, CreateEllipticRgn, CreatePolygonRgn, CreateRectRgn, DeleteObject, SetWindowRgn, RGN_OR, WINDING,
+        CombineRgn, CreateEllipticRgn, CreatePolygonRgn, DeleteObject, SetWindowRgn, RGN_OR, WINDING,
     };
     let (egg, parts, ring) = outlines(scale, outline);
     let pts = |v: &[(i32, i32)]| v.iter().map(|&(x, y)| POINT { x, y }).collect::<Vec<_>>();
@@ -108,11 +106,6 @@ fn windows_region(hwnd: isize, scale: f32, outline: &Outline) {
             let ring_rgn = CreateEllipticRgn(ring.0, ring.1, ring.2, ring.3);
             CombineRgn(region, region, ring_rgn, RGN_OR);
             DeleteObject(ring_rgn);
-        }
-        if let Some((x, y, w, h)) = outline.panel {
-            let r = CreateRectRgn(x, y, x + w, y + h);
-            CombineRgn(region, region, r, RGN_OR);
-            DeleteObject(r);
         }
         // the system owns `region` after this call
         SetWindowRgn(hwnd as _, region, 1);
@@ -149,14 +142,8 @@ fn x11_input_shape(
     let pf: Vec<Vec<(f32, f32)>> = parts.iter().map(to_f).collect();
     let ring = ring
         .map(|ring| ((ring.0 + ring.2) as f32 / 2.0, (ring.1 + ring.3) as f32 / 2.0, (ring.2 - ring.0) as f32 / 2.0));
-    let in_panel = |x: f32, y: f32| {
-        outline.panel.is_some_and(|(px, py, pw, ph)| {
-            x >= px as f32 && x < (px + pw) as f32 && y >= py as f32 && y < (py + ph) as f32
-        })
-    };
     let inside = |x: f32, y: f32| {
-        in_panel(x, y)
-            || point_in_poly(x, y, &ef)
+        point_in_poly(x, y, &ef)
             || pf.iter().any(|p| point_in_poly(x, y, p))
             || ring.is_some_and(|(rcx, rcy, rr)| ((x - rcx).powi(2) + (y - rcy).powi(2)).sqrt() <= rr)
     };

@@ -105,7 +105,7 @@ fn main() {
     if let Some(file) = shot {
         core.frame(0.1);
         core.shade = core.lcd.buf.map(|v| v as f32);
-        let pm = Renderer::new().render(&core, core.game.settings.ui.scale, 1.0, None, bytepet::core::now_unix());
+        let pm = Renderer::new().render(&core, core.game.settings.ui.scale, 1.0, bytepet::core::now_unix());
         if let Err(e) = pm.save_png(&file) {
             eprintln!("could not write {file}: {e}");
             std::process::exit(1);
