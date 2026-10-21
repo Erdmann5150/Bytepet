@@ -164,8 +164,8 @@ To try linking on one computer, run two copies with different saves:
 ## 🎨 Make it yours
 
 <div align="center">
-<img src="docs/readme/shells.png" alt="The twelve preset shells" width="760">
-<br><sub>BERRY · LIME · OCEAN · GRAPE · ZEBRA · FLAME · DONUT · CAMO · COSMIC · SWEET · MINT · RETRO</sub>
+<img src="docs/readme/shells.png" alt="The twelve preset shells, then two designs of your own" width="760">
+<br><sub>BERRY · LIME · OCEAN · GRAPE · ZEBRA · FLAME · DONUT · CAMO · COSMIC · SWEET · MINT · RETRO, then two of your own</sub>
 </div>
 
 <br>

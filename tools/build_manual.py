@@ -82,7 +82,8 @@ CW = PW - 2 * M
 
 ss = {
     "h1": ParagraphStyle("h1", fontName="Helvetica-Bold", fontSize=22, leading=26, textColor=INK, spaceAfter=4),
-    "num": ParagraphStyle("num", fontName="Helvetica-Bold", fontSize=10, leading=12, textColor=PINK, spaceAfter=2),
+    "num": ParagraphStyle("num", fontName="Helvetica-Bold", fontSize=10, leading=12, textColor=PINK, spaceAfter=2,
+                          spaceBefore=26),  # dropped at the top of a page
     "h2": ParagraphStyle("h2", fontName="Helvetica-Bold", fontSize=13, leading=16, textColor=INK, spaceBefore=12,
                          spaceAfter=4),
     "body": ParagraphStyle("body", fontName="Helvetica", fontSize=10, leading=14.5, textColor=INK, spaceAfter=6),
@@ -582,26 +583,21 @@ shell_row = Table(shell_rows, colWidths=[CW / 6] * 6)
 shell_row.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
                                ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
 story += [KeepTogether([P("Shell designs", "h2"), shell_row])]
-custom = Table([[img("menu_shell", 1.9 * inch),
-                 table([["Page", "Settings"],
-                        ["BODY", "COLOR (twenty colours), PATTERN (Plain, Zebra, Flame, Candy, Camo, Dots, Stripe or "
-                                 "Hearts), ACCENT (the pattern's colour; AUTO keeps its own) and GLOSS (the shine)."],
-                        ["BUTTONS", "COLOR (AUTO matches the body), SHAPE (Round, Square, Gem, Heart or Star) and "
-                                    "LETTERS (the A, B and C under them)."],
-                        ["ANTENNA", "SHAPE (Star, Heart, Moon, Bolt, Ball or None), COLOR and RING (the key ring "
-                                    "on top)."],
-                        ["SCREEN", "FACE (the panel around the screen), EDGE (its rim), FRAME (the border right "
-                                   "around the screen), CORNERS (Round, Soft or Square) and LCD (Classic, Gray, "
-                                   "Blue, Amber or Pink)."],
-                        ["ICONS", "ICONS (the menu icons), SELECT (the selected icon), ALERT (the attention "
-                                  "icon, lit whenever your pet needs something) and NAME (the BYTEPET text). AUTO keeps the "
-                                  "usual colours."],
-                        ["THEMES", "Up to 9 designs of your own: SAVE the one you're wearing, then pick a "
-                                   "THEME to WEAR it again or DELETE it."],
-                        ["RANDOM", "A surprise: every part at once. If your design isn't saved, it asks first."]],
-                       [0.9 * inch, CW - 2.2 * inch - 0.9 * inch])]],
-               colWidths=[2.2 * inch, CW - 2.2 * inch])
-custom.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
+custom = table([["Page", "Settings"],
+                ["BODY", "COLOR (twenty colours), PATTERN (Plain, Zebra, Flame, Candy, Camo, Dots, Stripe or "
+                         "Hearts), ACCENT (the pattern's colour; AUTO keeps its own) and GLOSS (the shine)."],
+                ["BUTTONS", "COLOR (AUTO matches the body), SHAPE (Round, Square, Gem, Heart or Star) and "
+                            "LETTERS (the A, B and C under them)."],
+                ["ANTENNA", "SHAPE (Star, Heart, Moon, Bolt, Ball or None), COLOR and RING (the key ring on top)."],
+                ["SCREEN", "FACE (the panel around the screen), EDGE (its rim), FRAME (the border right around the "
+                           "screen), CORNERS (Round, Soft or Square) and LCD (Classic, Gray, Blue, Amber or Pink)."],
+                ["ICONS", "ICONS (the menu icons), SELECT (the selected icon), ALERT (the attention icon, lit "
+                          "whenever your pet needs something) and NAME (the BYTEPET text). AUTO keeps the usual "
+                          "colours."],
+                ["THEMES", "Up to 9 designs of your own: SAVE the one you're wearing, then pick a THEME to WEAR "
+                           "it again or DELETE it."],
+                ["RANDOM", "A surprise: every part at once. If your design isn't saved, it asks first."]],
+               [0.9 * inch, CW - 0.9 * inch])
 story += [KeepTogether([
     P("Make it your own", "h2"),
     P("Choose <b>SHELL</b> in the settings (Town → SETUP → MORE) for a page of its own. "
@@ -610,7 +606,11 @@ story += [KeepTogether([
       "<b>left</b> and <b>right</b> arrow keys to go either way. The settings stay on the screen, so you "
       "see each part change as you go. Once you've changed anything, the shell reads <b>CUSTOM</b>. "
       "Right-click or <b>C</b> goes back a page."),
-    custom])]
+    Spacer(1, 4), img("customs", CW),
+    P("Six designs of your own. Between them they use every antenna (including none), every button shape, all "
+      "three corner styles and all five LCD colours.", "cap")]),
+    # free to run on to the next page (its header repeats), so it never leaves a gap behind
+    Spacer(1, 6), custom]
 
 # 9 linking
 soulmate = max(FRIENDS, key=lambda f: f["links"])

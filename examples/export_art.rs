@@ -8,22 +8,45 @@ use std::path::{Path, PathBuf};
 use bytepet::content::{Content, Pose, Stage};
 use bytepet::core::Core;
 use bytepet::games::{self, GameHost, SoloGame, VersusGame};
+use bytepet::look::{Look, PRESETS};
 use bytepet::overlay::Page;
 use bytepet::render::{lcd_pixmap, sprite_pixmap, Renderer};
 use bytepet::rng::Pcg32;
 use bytepet::screens::{boxed, care, town, Screen};
 use bytepet::sim::{Call, CallReason, Game};
 use bytepet::Button;
+use tiny_skia::{Pixmap, PixmapPaint, Transform};
 
 struct Rig {
     core: Core,
     wall: f64,
 }
 
+/// A pet for each preset shell, in `PRESETS` order: BERRY LIME OCEAN GRAPE ZEBRA FLAME /
+/// DONUT CAMO COSMIC SWEET MINT RETRO.
+const SHELL_PETS: [(Stage, &str); 12] = [
+    (Stage::Child, "child_a"),
+    (Stage::Teen, "teen_h"),
+    (Stage::Adult, "g_a"),
+    (Stage::Adult, "s_m"),
+    (Stage::Adult, "h_b"),
+    (Stage::Adult, "p_a"),
+    (Stage::Baby, "baby"),
+    (Stage::Child, "child_b"),
+    (Stage::Adult, "s_h"),
+    (Stage::Adult, "g_b"),
+    (Stage::Teen, "teen_p"),
+    (Stage::Senior, "senior"),
+];
+
 impl Rig {
     fn new(stage: Stage, character: &str) -> Rig {
+        Rig::seeded(stage, character, 5)
+    }
+    /// Pets with different seeds wander differently (see `wander`).
+    fn seeded(stage: Stage, character: &str, seed: u64) -> Rig {
         let content = Content::builtin();
-        let mut game = Game::new(&content, Pcg32::new(5));
+        let mut game = Game::new(&content, Pcg32::new(seed));
         game.pet.name = "KIWI".into();
         game.pet.stage = stage;
         game.pet.character = character.into();
@@ -41,6 +64,11 @@ impl Rig {
             self.wall += 1.0 / 30.0;
             self.core.frame_at(1.0 / 30.0, self.wall);
         }
+    }
+    /// Let the pet walk about the screen for a while, so a picture catches it mid-stroll
+    /// rather than where every pet starts.
+    fn wander(&mut self, secs: f64) {
+        self.frames((secs * 30.0) as usize);
     }
     fn push(&mut self, s: Box<dyn Screen>) {
         self.core.stack.push(s);
@@ -78,121 +106,151 @@ fn game_shot(dir: &Path, name: &str, g: Box<dyn games::MiniGame>, frames: usize,
     r.lcd(dir, &format!("game_{name}"));
 }
 
-/// The README's top image: a group shot of seven devices, each a different shell with a pet
-/// at a different stage of life, egg to senior. The middle one is biggest and in front, and
-/// the rest step down in size towards the edges, each tucked slightly behind its neighbour.
-fn hero(dir: &Path) {
-    use bytepet::look::{Antenna, ButtonShape, Lcd, Pattern, PRESETS};
-    let preset = |name: &str| PRESETS.iter().find(|p| p.name == name).map(|p| p.look).unwrap();
-    // a made-over GRAPE, to show off the customiser
-    let mut custom = preset("GRAPE");
-    custom.pattern = Pattern::Stripes;
-    custom.button_shape = ButtonShape::Star;
-    custom.buttons = Some(bytepet::look::PALETTE[3].1); // yellow
-    custom.antenna = Antenna::Bolt;
-    custom.antenna_color = custom.buttons;
-    custom.lcd = Lcd::Gray;
-    // left to right, a life from egg to senior; sizes rise to the middle and fall again
-    let cast = [
-        (preset("FLAME"), Stage::Egg, "egg", 0.40),
-        (preset("SWEET"), Stage::Baby, "baby", 0.48),
-        (preset("MINT"), Stage::Child, "child_a", 0.56),
-        (preset("COSMIC"), Stage::Teen, "teen_g", 0.66),
-        (custom, Stage::Adult, "s_p", 0.56),
-        (preset("ZEBRA"), Stage::Adult, "h_a", 0.48),
-        (preset("RETRO"), Stage::Senior, "senior", 0.40),
-    ];
-    let mut devices = Vec::new();
-    for (i, (look, stage, character, scale)) in cast.into_iter().enumerate() {
-        let mut r = Rig::new(stage, character);
-        r.core.game.settings.look = look;
-        let p = &mut r.core.game.pet;
-        match i {
-            0 => p.stage_s = 40.0, // old enough to wobble
-            2 => p.poop = 2,
-            4 => p.praise_t = 100.0, // showing off
-            _ => {}
-        }
-        r.frames(45);
-        r.core.shade = r.core.lcd.buf.map(|v| v as f32);
-        devices.push(Renderer::new().render(&r.core, scale, 1.0, r.wall));
-    }
-    // neighbours overlap by a fifth of the smaller one, all centred on one line
-    let overlap = |a: &tiny_skia::Pixmap, b: &tiny_skia::Pixmap| (a.width().min(b.width()) as f32 * 0.2) as u32;
+/// A device in `look` with a pet on it, after the pet has wandered about for a few seconds
+/// (each `seed` walks its own way), so pictures don't all show it in the same spot. The key
+/// ring is always on, so it isn't missing from some pictures for no clear reason.
+fn shot(look: Look, (stage, character): (Stage, &str), seed: u64, scale: f32, tweak: impl FnOnce(&mut Rig)) -> Pixmap {
+    let mut r = Rig::seeded(stage, character, seed);
+    r.core.game.settings.look = Look { ring: true, ..look };
+    tweak(&mut r);
+    // an egg hatches after a minute, and doesn't walk anyway
+    r.wander(if stage == Stage::Egg { 1.5 } else { 5.0 + (seed % 7) as f64 });
+    r.core.shade = r.core.lcd.buf.map(|v| v as f32);
+    Renderer::new().render(&r.core, scale, 1.0, r.wall)
+}
+
+/// Made-up looks that between them use every antenna, button shape, corner style and LCD
+/// colour, including the ones no preset has: no antenna, star buttons and soft corners.
+fn showcase() -> [Look; 6] {
+    use bytepet::look::{Antenna as A, ButtonShape as B, Corners as C, Lcd as L, Pattern as P, PALETTE};
+    let c = |i: usize| PALETTE[i].1;
+    let look = |body, pattern, buttons, button_shape, antenna, corners, lcd| Look {
+        pattern,
+        buttons: Some(buttons),
+        button_shape,
+        antenna,
+        antenna_color: Some(buttons),
+        corners,
+        lcd,
+        ..Look::plain(body)
+    };
+    [
+        look(c(12), P::Stripes, c(3), B::Star, A::None, C::Soft, L::Gray), // purple, yellow stars
+        look(c(8), P::Dots, c(4), B::Gem, A::Star, C::Square, L::Amber),   // teal, gold
+        look(c(10), P::Hearts, c(0), B::Heart, A::Heart, C::Round, L::Pink), // sky, pink hearts
+        look(c(3), P::Zebra, c(19), B::Square, A::Bolt, C::Soft, L::Classic), // yellow and black
+        look(c(11), P::Sprinkles, c(17), B::Round, A::Moon, C::Round, L::Blue), // navy, silver
+        look(c(5), P::Camo, c(2), B::Star, A::Ball, C::Square, L::Classic), // lime, orange
+    ]
+}
+
+/// Lay devices side by side, overlapping by `overlap` of the narrower of each pair and centred
+/// on one line, the middle ones in front.
+fn row(devices: &[Pixmap], overlap: f32) -> Pixmap {
     let mut xs = vec![0u32];
     for pair in devices.windows(2) {
-        let x = xs.last().unwrap() + pair[0].width() - overlap(&pair[0], &pair[1]);
-        xs.push(x);
+        let o = (pair[0].width().min(pair[1].width()) as f32 * overlap) as u32;
+        xs.push(xs.last().unwrap() + pair[0].width() - o);
     }
     let w = xs.last().unwrap() + devices.last().unwrap().width();
     let h = devices.iter().map(|d| d.height()).max().unwrap();
-    let mut out = tiny_skia::Pixmap::new(w, h).unwrap();
-    // from the edges in, so each one stands in front of the smaller ones beside it
-    let mid = devices.len() / 2;
+    let mut out = Pixmap::new(w, h).unwrap();
+    // from the edges in, so each one stands in front of the ones further out
+    let mid = (devices.len() - 1) as f32 / 2.0;
     let mut order: Vec<usize> = (0..devices.len()).collect();
-    order.sort_by_key(|&i| std::cmp::Reverse(i.abs_diff(mid)));
+    order.sort_by(|&a, &b| (b as f32 - mid).abs().total_cmp(&(a as f32 - mid).abs()));
     for i in order {
         let d = &devices[i];
         let y = ((h - d.height()) / 2) as i32;
-        let paint = tiny_skia::PixmapPaint::default();
-        out.draw_pixmap(xs[i] as i32, y, d.as_ref(), &paint, tiny_skia::Transform::identity(), None);
+        out.draw_pixmap(xs[i] as i32, y, d.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
     }
-    out.save_png(dir.join("hero.png")).unwrap();
+    out
 }
 
-/// The README's "Make it yours" image: all twelve preset shells in order, each with a
-/// different pet, in two staggered rows, the back one tucked slightly behind the front.
-fn shells(dir: &Path) {
-    use bytepet::look::PRESETS;
-    // BERRY LIME OCEAN GRAPE ZEBRA FLAME / DONUT CAMO COSMIC SWEET MINT RETRO
-    let pets = [
-        (Stage::Child, "child_a"),
-        (Stage::Teen, "teen_h"),
-        (Stage::Adult, "g_a"),
-        (Stage::Adult, "s_m"),
-        (Stage::Adult, "h_b"),
-        (Stage::Adult, "p_a"),
-        (Stage::Baby, "baby"),
-        (Stage::Child, "child_b"),
-        (Stage::Adult, "s_h"),
-        (Stage::Adult, "g_b"),
-        (Stage::Teen, "teen_p"),
-        (Stage::Senior, "senior"),
+/// The README's top image: a group shot of seven devices, each a different shell with a pet
+/// at a different stage of life, egg to senior. The middle one is biggest and in front, and
+/// the rest step down in size towards the edges. Between them they show every antenna, button
+/// shape and corner style.
+fn hero(dir: &Path) {
+    let preset = |name: &str| PRESETS.iter().find(|p| p.name == name).map(|p| p.look).unwrap();
+    // left to right, a life from egg to senior; sizes rise to the middle and fall again
+    let cast = [
+        (preset("FLAME"), (Stage::Egg, "egg"), 0.40),
+        (preset("SWEET"), (Stage::Baby, "baby"), 0.48),
+        (preset("MINT"), (Stage::Child, "child_a"), 0.56),
+        (preset("COSMIC"), (Stage::Teen, "teen_g"), 0.66),
+        (showcase()[0], (Stage::Adult, "s_p"), 0.56),
+        (preset("ZEBRA"), (Stage::Adult, "h_a"), 0.48),
+        (preset("RETRO"), (Stage::Senior, "senior"), 0.40),
     ];
-    let scale = 0.53;
-    let devices: Vec<tiny_skia::Pixmap> = PRESETS
-        .iter()
+    let devices: Vec<Pixmap> = cast
+        .into_iter()
+        .enumerate()
+        .map(|(i, (look, pet, scale))| {
+            shot(look, pet, 11 + i as u64, scale, |r| {
+                let p = &mut r.core.game.pet;
+                match i {
+                    0 => p.stage_s = 40.0, // old enough to wobble
+                    2 => p.poop = 2,
+                    4 => p.praise_t = 100.0, // showing off
+                    _ => {}
+                }
+            })
+        })
+        .collect();
+    row(&devices, 0.2).save_png(dir.join("hero.png")).unwrap();
+}
+
+/// The README's "Make it yours" image: the twelve preset shells in order, then two designs of
+/// your own (with the shapes no preset has), each with a different pet, in two staggered rows
+/// of seven.
+fn shells(dir: &Path) {
+    let looks = PRESETS.iter().map(|p| p.look).chain([showcase()[0], showcase()[3]]);
+    let pets = SHELL_PETS.into_iter().chain([(Stage::Adult, "g_c"), (Stage::Adult, "p_b")]);
+    let devices: Vec<Pixmap> = looks
         .zip(pets)
         .enumerate()
-        .map(|(i, (p, (stage, character)))| {
-            let mut r = Rig::new(stage, character);
-            r.core.game.settings.look = p.look;
-            if i % 4 == 3 {
-                r.core.game.pet.praise_t = 100.0; // a few of them dancing
-            }
-            r.frames(45 + 7 * i); // so they don't all stand the same way
-            r.core.shade = r.core.lcd.buf.map(|v| v as f32);
-            Renderer::new().render(&r.core, scale, 1.0, r.wall)
+        .map(|(i, (look, pet))| {
+            shot(look, pet, 31 + i as u64, 0.53, |r| {
+                if i % 4 == 3 {
+                    r.core.game.pet.praise_t = 100.0; // a few of them dancing
+                }
+            })
         })
         .collect();
     let (dw, dh) = (devices[0].width(), devices[0].height());
     let per_row = devices.len() / 2;
-    // a little closer than side by side, the second row half a step along and a little up
+    // a little closer than side by side, the second row half a step along; the rows don't
+    // overlap, so every antenna shows in full
     let step_x = dw * 92 / 100;
-    let step_y = dh * 93 / 100;
     let w = step_x * (per_row as u32 - 1) + step_x / 2 + dw;
-    let h = step_y + dh;
-    let mut out = tiny_skia::Pixmap::new(w, h).unwrap();
-    // the second row first, so its antennas tuck behind the first row instead of covering
-    // its buttons
-    for (i, d) in devices.iter().enumerate().rev() {
-        let (row, col) = (i / per_row, (i % per_row) as u32);
-        let x = col * step_x + row as u32 * step_x / 2;
-        let y = row as u32 * step_y;
-        let paint = tiny_skia::PixmapPaint::default();
-        out.draw_pixmap(x as i32, y as i32, d.as_ref(), &paint, tiny_skia::Transform::identity(), None);
+    let mut out = Pixmap::new(w, 2 * dh).unwrap();
+    for (i, d) in devices.iter().enumerate() {
+        let (r, c) = ((i / per_row) as u32, (i % per_row) as u32);
+        let (x, y) = (c * step_x + r * step_x / 2, r * dh);
+        out.draw_pixmap(x as i32, y as i32, d.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
     }
     out.save_png(dir.join("shells.png")).unwrap();
+}
+
+/// The manual's strip of designs of your own: every antenna, button shape, corner style and
+/// LCD colour.
+fn customs(dir: &Path) {
+    let pets = [
+        (Stage::Adult, "g_c"),
+        (Stage::Adult, "h_c"),
+        (Stage::Teen, "teen_h"),
+        (Stage::Adult, "p_b"),
+        (Stage::Adult, "s_g"),
+        (Stage::Child, "child_b"),
+    ];
+    let devices: Vec<Pixmap> = showcase()
+        .into_iter()
+        .zip(pets)
+        .enumerate()
+        .map(|(i, (look, pet))| shot(look, pet, 51 + i as u64, 0.5, |_| {}))
+        .collect();
+    row(&devices, 0.06).save_png(dir.join("customs.png")).unwrap();
 }
 
 fn main() {
@@ -235,15 +293,15 @@ fn main() {
 
     hero(&dir);
     shells(&dir);
+    customs(&dir);
 
-    // devices: every shell, and the three common sizes
+    // devices: every shell, each with its own pet, and the three common sizes
+    for (i, (p, pet)) in PRESETS.iter().zip(SHELL_PETS).enumerate() {
+        let pm = shot(p.look, pet, 31 + i as u64, 0.5, |_| {});
+        pm.save_png(dir.join(format!("shell_{}.png", p.name.to_lowercase()))).unwrap();
+    }
     let mut r = Rig::new(Stage::Adult, "g_b");
     r.frames(30);
-    for (i, p) in bytepet::look::PRESETS.iter().enumerate() {
-        r.core.game.settings.set_shell(i as u32);
-        r.frames(1);
-        r.device(&dir, &format!("shell_{}", p.name.to_lowercase()), 0.5);
-    }
     r.core.game.settings.set_shell(1);
     r.device(&dir, "device_cover", 2.0);
     r.core.game.settings.set_shell(0);
@@ -277,15 +335,17 @@ fn main() {
     r.core.overlay.close();
 
     // LCD screens
-    let mut r = Rig::new(Stage::Child, "child_a");
-    r.frames(10);
+    let mut r = Rig::seeded(Stage::Child, "child_a", 7);
+    r.wander(6.0);
     r.lcd(&dir, "main");
     r.core.game.pet.poop = 3;
     r.core.game.pet.sick = true;
     r.frames(2);
     r.lcd(&dir, "sick");
-    let mut r = Rig::new(Stage::Teen, "teen_g");
-    r.core.game.pet.asleep = true;
+    // a stroll by day, then bedtime with the lights still on
+    let mut r = Rig::seeded(Stage::Teen, "teen_g", 3);
+    r.wander(5.0);
+    r.core.hour_at = |_| 23.0;
     r.frames(10);
     r.lcd(&dir, "sleep");
     let mut r = Rig::new(Stage::Teen, "teen_p");
@@ -359,11 +419,11 @@ fn main() {
     game_shot(&dir, "quiz", Box::new(games::Quiz::new("CLASS", 5)), 5, &[]);
     game_shot(&dir, "office", Box::new(games::Office::default()), 40, &[]);
     game_shot(&dir, "chef", Box::new(games::Chef::default()), 5, &[]);
-    game_shot(&dir, "fire", Box::new(games::Fire::default()), 110, &[]);
-    game_shot(&dir, "rock", Box::new(games::Rock::default()), 60, &[]);
+    game_shot(&dir, "fire", Box::new(games::Fire::default()), 260, &[]);
+    game_shot(&dir, "rock", Box::new(games::Rock::default()), 160, &[]);
     game_shot(&dir, "science", Box::new(games::Science::default()), 14, &[]);
     game_shot(&dir, "eats", VersusGame::Eats.make(), 30, &[Button::B]);
     game_shot(&dir, "flags", VersusGame::Flags.make(), 5, &[]);
-    game_shot(&dir, "bump", VersusGame::Bump.make(), 12, &[]);
+    game_shot(&dir, "bump", VersusGame::Bump.make(), 45, &[]);
     println!("wrote art to {}", dir.display());
 }

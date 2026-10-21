@@ -241,7 +241,10 @@ impl Screen for MainScreen {
         let x = self.x.min(MainScreen::max_x(p.poop, p.sick)) as i32;
         if p.asleep {
             lcd.draw(c.sprite(&p.character, Pose::Sleep), x, 0);
-            let zx = (18 + (self.t as i32 % 3) * 2).min(28);
+            // the Z drifts away from the pet on whichever side has room, so it never sits on
+            // its head (where it would look like a bow)
+            let drift = self.t as i32 % 3 * 2;
+            let zx = if x <= 9 { x + 16 + drift } else { x - 3 - drift };
             lcd.draw(c.prop("zzz"), zx, 1 + f);
             return;
         }
