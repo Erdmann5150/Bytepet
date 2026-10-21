@@ -596,7 +596,8 @@ custom = table([["Page", "Settings"],
                           "colours."],
                 ["THEMES", "Up to 9 designs of your own: SAVE the one you're wearing, then pick a THEME to WEAR "
                            "it again or DELETE it."],
-                ["RANDOM", "A surprise: every part at once. If your design isn't saved, it asks first."]],
+                ["RANDOM", "A surprise: every part at once. It asks first, then re-rolls with each press "
+                           "until you leave the page."]],
                [0.9 * inch, CW - 0.9 * inch])
 story += [KeepTogether([
     P("Make it your own", "h2"),
