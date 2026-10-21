@@ -564,7 +564,7 @@ story += [screens([("lcd_town", "The Town menu"), ("lcd_clock", "B on the main s
                  ["SETUP", "SPEED (1×, 10×, 60×, 600×), SOUND (OFF or a volume), SHELL (steps through the "
                            "twelve designs), "
                            "WHEN OFF (RUNS or PAUSE: whether time passes while Bytepet is closed), MORE (opens the "
-                           "desktop menu) and NEW EGG (start over)."]],
+                           "full settings) and NEW EGG (start over)."]],
                 [1.1 * inch, CW - 1.1 * inch]),
           Spacer(1, 8)]
 SHELLS = ("berry", "lime", "ocean", "grape", "zebra", "flame",
