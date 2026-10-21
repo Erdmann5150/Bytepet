@@ -78,6 +78,54 @@ fn game_shot(dir: &Path, name: &str, g: Box<dyn games::MiniGame>, frames: usize,
     r.lcd(dir, &format!("game_{name}"));
 }
 
+/// The README's top image: six devices in a row, each a different shell with a pet at a
+/// different stage of life, egg to senior, some of them up to something.
+fn hero(dir: &Path) {
+    use bytepet::look::{Antenna, ButtonShape, Lcd, Pattern, PRESETS};
+    let preset = |name: &str| PRESETS.iter().find(|p| p.name == name).map(|p| p.look).unwrap();
+    // a made-over DONUT, to show off the customiser
+    let mut custom = preset("DONUT");
+    custom.button_shape = ButtonShape::Star;
+    custom.antenna = Antenna::Bolt;
+    custom.lcd = Lcd::Gray;
+    custom.pattern = Pattern::Stripes;
+    let cast = [
+        (preset("FLAME"), Stage::Egg, "egg", 0.52),
+        (preset("SWEET"), Stage::Baby, "baby", 0.62),
+        (preset("MINT"), Stage::Child, "child_a", 0.52),
+        (preset("COSMIC"), Stage::Teen, "teen_g", 0.62),
+        (custom, Stage::Adult, "s_p", 0.52),
+        (preset("RETRO"), Stage::Senior, "senior", 0.62),
+    ];
+    let mut devices = Vec::new();
+    for (i, (look, stage, character, scale)) in cast.into_iter().enumerate() {
+        let mut r = Rig::new(stage, character);
+        r.core.game.settings.look = look;
+        let p = &mut r.core.game.pet;
+        match i {
+            0 => p.stage_s = 40.0, // old enough to wobble
+            2 => p.poop = 2,
+            4 => p.praise_t = 100.0, // showing off
+            _ => {}
+        }
+        r.frames(45);
+        r.core.shade = r.core.lcd.buf.map(|v| v as f32);
+        devices.push(Renderer::new().render(&r.core, scale, 1.0, r.wall));
+    }
+    let gap = 10;
+    let w = devices.iter().map(|d| d.width()).sum::<u32>() + gap * (devices.len() as u32 - 1);
+    let h = devices.iter().map(|d| d.height()).max().unwrap();
+    let mut out = tiny_skia::Pixmap::new(w, h).unwrap();
+    let mut x = 0;
+    for d in &devices {
+        // big and small take turns, standing on the same line
+        let y = (h - d.height()) as i32;
+        out.draw_pixmap(x, y, d.as_ref(), &tiny_skia::PixmapPaint::default(), tiny_skia::Transform::identity(), None);
+        x += (d.width() + gap) as i32;
+    }
+    out.save_png(dir.join("hero.png")).unwrap();
+}
+
 fn main() {
     let dir = PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| "art".into()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -115,6 +163,8 @@ fn main() {
         }
     }
     title.save_png(dir.join("title.png")).unwrap();
+
+    hero(&dir);
 
     // devices: every shell, and the three common sizes
     let mut r = Rig::new(Stage::Adult, "g_b");
