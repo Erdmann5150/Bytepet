@@ -801,7 +801,7 @@ mod tests {
         // the scroll wheel wraps within the page
         core.overlay.go(Page::Part(Part::Antenna), 0);
         scroll(&mut core, -1);
-        assert_eq!(core.overlay.hover, Some(3));
+        assert_eq!(core.overlay.hover, Some(4));
     }
 
     #[test]

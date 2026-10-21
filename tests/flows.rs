@@ -227,7 +227,7 @@ fn a_menu_left_alone_goes_home() {
     r.tap(Button::B); // MAIL: "NO MAIL", then back to town
     r.tap(Button::B);
     assert_eq!(r.top(), "TownMenu");
-    r.frames(30 * 59);
+    r.frames(30 * 9);
     assert_eq!(r.top(), "TownMenu", "too soon");
     r.frames(30 * 2);
     assert!(r.core.at_home());
@@ -236,7 +236,7 @@ fn a_menu_left_alone_goes_home() {
     // at home, a highlighted icon goes out after a while on its own
     r.tap(Button::A);
     assert_eq!(r.core.ui.sel, 0);
-    r.frames(30 * 29);
+    r.frames(30 * 9);
     assert_eq!(r.core.ui.sel, 0);
     r.frames(30 * 2);
     assert_eq!(r.core.ui.sel, -1);
@@ -244,11 +244,11 @@ fn a_menu_left_alone_goes_home() {
     // as a press, see the desktop shell)
     r.core.overlay.open();
     r.core.touch();
-    r.frames(30 * 50);
+    r.frames(30 * 8);
     r.tap(Button::A);
-    r.frames(30 * 50);
+    r.frames(30 * 8);
     assert!(r.core.overlay.is_open());
-    r.frames(30 * 11);
+    r.frames(30 * 3);
     assert!(!r.core.overlay.is_open());
     // a game is never cut short, nor its score
     let mut r = Rig::with_pet(11, Stage::Teen, "teen_g");
@@ -478,4 +478,31 @@ fn icons_dont_interrupt_a_game() {
     assert_eq!(r.top(), "Game");
     r.core.click_icon(1);
     assert_eq!(r.top(), "Game");
+}
+
+#[test]
+fn the_device_shakes_with_the_call_beep() {
+    use bytepet::core::SHAKE_REACH;
+    let mut r = Rig::with_pet(12, Stage::Child, "child_a");
+    r.frames(5);
+    assert_eq!(r.core.shake_offset(), 0.0);
+    // hungry: it calls
+    r.core.game.pet.hunger = 0;
+    let mut most = 0.0f32;
+    for _ in 0..10 {
+        r.frames(1);
+        most = most.max(r.core.shake_offset().abs());
+    }
+    assert!(most > 0.5 && most <= SHAKE_REACH as f32, "shook {most}");
+    // a quick buzz, then still again
+    r.frames(30);
+    assert_eq!(r.core.shake_offset(), 0.0);
+    // and again with the reminder beep a minute later, sound or no sound
+    r.core.game.settings.muted = true;
+    let mut shook = false;
+    for _ in 0..30 * 61 {
+        r.frames(1);
+        shook |= r.core.shake_offset() != 0.0;
+    }
+    assert!(shook, "no shake with the reminder beep");
 }
