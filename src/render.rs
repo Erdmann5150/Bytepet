@@ -3,8 +3,8 @@
 //! which take over the LCD while open) are drawn every frame.
 
 use tiny_skia::{
-    Color, FillRule, GradientStop, LineCap, Mask, Paint, Path, PathBuilder, Pixmap, Point, RadialGradient, Rect,
-    SpreadMode, Stroke, Transform,
+    Color, FillRule, GradientStop, LineCap, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Point, RadialGradient,
+    Rect, SpreadMode, Stroke, Transform,
 };
 
 use crate::core::Core;
@@ -70,10 +70,32 @@ fn fill(pm: &mut Pixmap, path: Option<Path>, c: Color, ts: Transform, mask: Opti
 }
 
 fn stroke(pm: &mut Pixmap, path: Option<Path>, c: Color, width: f32, ts: Transform) {
+    stroke_masked(pm, path, c, width, ts, None);
+}
+
+fn stroke_masked(pm: &mut Pixmap, path: Option<Path>, c: Color, width: f32, ts: Transform, mask: Option<&Mask>) {
     if let Some(p) = path {
         let s = Stroke { width, line_cap: LineCap::Round, ..Stroke::default() };
-        pm.stroke_path(&p, &paint(c), &s, ts, None);
+        pm.stroke_path(&p, &paint(c), &s, ts, mask);
     }
+}
+
+fn line(a: (f32, f32), b: (f32, f32)) -> Option<Path> {
+    let mut pb = PathBuilder::new();
+    pb.move_to(a.0, a.1);
+    pb.line_to(b.0, b.1);
+    pb.finish()
+}
+
+/// An open path through `points`.
+fn polyline(points: &[(f32, f32)]) -> Option<Path> {
+    let mut pb = PathBuilder::new();
+    let (x0, y0) = points.first()?;
+    pb.move_to(*x0, *y0);
+    for &(x, y) in &points[1..] {
+        pb.line_to(x, y);
+    }
+    pb.finish()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -107,6 +129,8 @@ pub struct FrameKey {
     menu: Vec<bool>,
     status: String,
     typing: bool,
+    /// How far the device is shaken, in window pixels.
+    shake: i32,
 }
 
 impl FrameKey {
@@ -122,6 +146,7 @@ impl FrameKey {
             menu: if open { overlay::dots(core) } else { Vec::new() },
             status: core.status_tags(),
             typing: core.wants_text(),
+            shake: shake_px(core, scale),
         }
     }
 }
@@ -129,6 +154,11 @@ impl FrameKey {
 /// Window size in pixels for a given scale (window pixels per design unit).
 pub fn window_size(scale: f32) -> (u32, u32) {
     ((VIEW.2 * scale).round() as u32, (VIEW.3 * scale).round() as u32)
+}
+
+/// The shake (see [`Core::shake_offset`]) in whole window pixels.
+fn shake_px(core: &Core, scale: f32) -> i32 {
+    (core.shake_offset() * scale).round() as i32
 }
 
 fn design_ts(scale: f32) -> Transform {
@@ -147,6 +177,12 @@ impl Renderer {
         let (w, h) = window_size(scale);
         let mut pm = self.shell(&core.game.settings.look, w.max(1), h.max(1), scale).clone();
         self.dynamic(&mut pm, core, scale, wall);
+        let dx = shake_px(core, scale);
+        if dx != 0 {
+            let mut moved = Pixmap::new(pm.width(), pm.height()).expect("pixmap");
+            moved.draw_pixmap(dx, 0, pm.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+            pm = moved;
+        }
         pm
     }
 
@@ -327,27 +363,33 @@ fn paint_shell(pm: &mut Pixmap, look: &Look, scale: f32) {
     let base = look.body;
     let rim = darken(base, 0.35);
 
-    // key ring and antenna, behind the shell
+    // key ring tab and antenna, behind the shell
     if look.ring {
-        stroke(pm, circle(RING.0, RING.1, 16.0), rgba([190, 190, 200], 255), 4.0, ts);
+        paint_ring_tab(pm, look, ts);
     }
-    let antenna = antenna_points(look.antenna);
-    if !antenna.is_empty() {
-        // the stem runs from the charm's middle but only shows outside it, so it meets the
-        // outline cleanly and doesn't show through the see-through charm
+    if let Some((antenna, attach)) = antenna(look.antenna, look.antenna_side) {
+        // the stem starts just inside the charm where they meet and only shows outside it, so
+        // it meets the outline cleanly and doesn't show through the see-through charm
         let mut inside = Mask::new(pm.width(), pm.height()).expect("mask");
         if let Some(path) = poly(&antenna) {
             inside.fill_path(&path, FillRule::Winding, true, ts);
         }
         let mut outside = inside.clone();
         outside.invert();
-        let mut pb = PathBuilder::new();
-        pb.move_to(STEM.0, STEM.1);
-        pb.line_to(STEM.2, STEM.3);
-        if let Some(path) = pb.finish() {
-            let s = Stroke { width: 6.0, line_cap: LineCap::Round, ..Stroke::default() };
-            pm.stroke_path(&path, &paint(rgba([200, 200, 210], 255)), &s, ts, Some(&outside));
-        }
+        let (_, end) = stem(look.antenna_side);
+        let len = ((end.0 - attach.0).powi(2) + (end.1 - attach.1).powi(2)).sqrt();
+        let (dx, dy) = ((end.0 - attach.0) / len, (end.1 - attach.1) / len);
+        let start = (attach.0 - 3.0 * dx, attach.1 - 3.0 * dy);
+        // a metal rod: a dark edge, the rod, and a glint along its upper side
+        let rod = |pm: &mut Pixmap, a, b, c: [u8; 3], w: f32| {
+            stroke_masked(pm, line(a, b), rgba(c, 255), w, ts, Some(&outside));
+        };
+        rod(pm, start, end, [118, 120, 134], STEM_W + 3.0);
+        rod(pm, start, end, [196, 198, 210], STEM_W);
+        let (nx, ny) = if dx > 0.0 { (dy, -dx) } else { (-dy, dx) };
+        let k = STEM_W * 0.22;
+        let glint = |(x, y): (f32, f32), t: f32| (x + nx * k + dx * t, y + ny * k + dy * t);
+        rod(pm, glint(start, 4.0), glint(end, 0.0), [240, 240, 248], STEM_W * 0.25);
         let color = look.antenna_color.unwrap_or(lighten(base, 0.45));
         fill(pm, poly(&antenna), rgba(color, 215), ts, None);
         stroke(pm, poly(&antenna), Color::WHITE, 2.0, ts);
@@ -413,6 +455,24 @@ fn paint_shell(pm: &mut Pixmap, look: &Look, scale: f32) {
         }
     }
     ptext(pm, "BYTEPET", CX, fy + fh + 14.0, 2.0, rgba(look.name_color(), 255), true, ts);
+}
+
+/// The key ring tab: a lug on top of the shell with a hole through it, where a ring could go.
+/// Drawn before the shell, which covers the tab's lower part.
+fn paint_ring_tab(pm: &mut Pixmap, look: &Look, ts: Transform) {
+    let base = look.body;
+    // the tab, in the shell's colours
+    let (lx, ly, lw, lh) = LUG;
+    fill(pm, rounded(lx, ly, lw, lh, 13.0), rgba(darken(base, 0.35), 255), ts, None);
+    fill(pm, rounded(lx + 3.0, ly + 3.0, lw - 6.0, lh - 6.0, 10.0), rgba(lighten(base, 0.18), 255), ts, None);
+    // the hole, its far wall catching the light along the bottom
+    let (hx, hy, hr) = LUG_HOLE;
+    fill(pm, circle(hx, hy, hr), rgba(darken(base, 0.6), 255), ts, None);
+    let lip: Vec<(f32, f32)> = (0..=10)
+        .map(|i| (30.0 + i as f32 * 12.0f32).to_radians())
+        .map(|t| (hx + (hr - 0.8) * t.cos(), hy + (hr - 0.8) * t.sin()))
+        .collect();
+    stroke(pm, polyline(&lip), rgba(darken(base, 0.25), 255), 1.2, ts);
 }
 
 /// The body's pattern, drawn through `mask`.

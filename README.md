@@ -175,7 +175,7 @@ The settings' **SHELL** page has 12 preset designs, plus pages for every part of
 
 - **Body:** colour, pattern, pattern colour and shine
 - **Buttons:** colour, shape and letters
-- **Antenna:** shape, colour and key ring
+- **Antenna:** shape, colour, side (left or right) and key ring tab
 - **Screen:** faceplate, rim, frame, corners and LCD colour
 - **Icons:** icon colour, the selected icon, the alert icon and the BYTEPET text
 
@@ -198,8 +198,8 @@ empty space around the egg go through to whatever is behind it.
   change or open it, **C** to go back. With the mouse, **scroll** to pick a row, **click**
   to change or open it and **right-click** to go back. On the keyboard, up and down move,
   and left and right change a setting either way.
-- **Left alone,** a menu or the settings go back to the home screen after a minute, and a
-  highlighted icon goes out after 30 seconds. Games, animations and links are never cut short.
+- **Left alone,** a menu or the settings go back to the home screen, and a highlighted icon
+  goes out, after 10 seconds. Games, animations and links are never cut short.
 - **Tray or menu-bar icon:** hover over it to see how your pet is doing (its hearts and what
   it needs), and click it to show or hide the pet. Its menu has *Show / hide*,
   *Settings* (brings the pet forward with its settings open) and *Quit*. On Windows and

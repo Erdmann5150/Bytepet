@@ -1,7 +1,7 @@
 //! Device geometry, in design units on a 440x640 canvas. How it is coloured and decorated is
 //! in [`crate::look`].
 
-use crate::look::{Antenna, Corners, Look};
+use crate::look::{Antenna, Corners, Look, Side};
 
 pub const CANVAS_W: f32 = 440.0;
 pub const CANVAS_H: f32 = 640.0;
@@ -18,9 +18,11 @@ pub const BUTTONS: [(crate::Button, f32, f32); 3] =
     [(crate::Button::A, 142.0, 482.0), (crate::Button::B, 220.0, 500.0), (crate::Button::C, 298.0, 482.0)];
 pub const BTN_R: f32 = 25.0;
 pub const STAR: (f32, f32) = (70.0, 70.0);
-/// The antenna's stem, from the charm's middle (x, y) to its end inside the shell. It is drawn
-/// only outside the charm, so it meets each charm's outline wherever that falls.
+/// The antenna's stem on the left, from the charm's middle (x, y) to its end inside the shell.
+/// The charm sits centred on its line; see [`antenna`].
 pub const STEM: (f32, f32, f32, f32) = (STAR.0, STAR.1, STAR.0 + 48.0, STAR.1 + 52.0);
+/// How thick the stem is.
+pub const STEM_W: f32 = 12.0;
 /// The part of the canvas the widget window shows: x, y, w, h.
 pub const VIEW: (f32, f32, f32, f32) = (2.0, 26.0, 436.0, 560.0);
 
@@ -97,9 +99,46 @@ pub fn circle_points(cx: f32, cy: f32, r: f32, n: usize) -> Vec<(f32, f32)> {
         .collect()
 }
 
-/// The antenna's outline; empty for none. Every shape fits within the original star's reach,
-/// so the window shape and hit-testing only have to follow the outline.
-pub fn antenna_points(a: Antenna) -> Vec<(f32, f32)> {
+/// The antenna is laid out on the left; on the right it is the mirror image across the middle.
+pub fn mirror((x, y): (f32, f32), side: Side) -> (f32, f32) {
+    match side {
+        Side::Left => (x, y),
+        Side::Right => (2.0 * CX - x, y),
+    }
+}
+
+/// The stem on `side`: from the charm's middle to its end inside the shell.
+pub fn stem(side: Side) -> ((f32, f32), (f32, f32)) {
+    (mirror((STEM.0, STEM.1), side), mirror((STEM.2, STEM.3), side))
+}
+
+/// A band round the stem, `grow` wider than it on every side, for hit-testing and the window
+/// shape.
+pub fn stem_band(side: Side, grow: f32) -> Vec<(f32, f32)> {
+    let ((x0, y0), (x1, y1)) = stem(side);
+    let len = ((x1 - x0).powi(2) + (y1 - y0).powi(2)).sqrt();
+    let (dx, dy) = ((x1 - x0) / len * grow, (y1 - y0) / len * grow);
+    let k = (STEM_W / 2.0 + grow) / grow;
+    let (nx, ny) = (-dy * k, dx * k);
+    vec![
+        (x0 - dx + nx, y0 - dy + ny),
+        (x1 + dx + nx, y1 + dy + ny),
+        (x1 + dx - nx, y1 + dy - ny),
+        (x0 - dx - nx, y0 - dy - ny),
+    ]
+}
+
+/// The antenna's outline on `side`; empty for none. Every shape fits within the original
+/// star's reach, so the window shape and hit-testing only have to follow the outline.
+pub fn antenna_points(a: Antenna, side: Side) -> Vec<(f32, f32)> {
+    antenna(a, side).map_or_else(Vec::new, |(pts, _)| pts)
+}
+
+/// An antenna charm's outline and the point on it where the stem meets it.
+pub type Charm = (Vec<(f32, f32)>, (f32, f32));
+
+/// The antenna's charm on `side`, or `None` for no antenna.
+pub fn antenna(a: Antenna, side: Side) -> Option<Charm> {
     // each charm is drawn upright, with the point where the stem should meet it
     let (pts, attach) = match a {
         Antenna::Star => (star_points_at(0.0, 0.0, 34.0, 15.0, 0.0), (0.0, 15.0)),
@@ -133,23 +172,23 @@ pub fn antenna_points(a: Antenna) -> Vec<(f32, f32)> {
             let pts = [(0.35, -1.0), (-0.6, 0.15), (-0.05, 0.15), (-0.35, 1.0), (0.65, -0.2), (0.1, -0.2)];
             (pts.iter().map(|&(x, y)| (x * 34.0, y * 34.0)).collect(), (-0.35 * 34.0, 34.0))
         }
-        Antenna::None => return Vec::new(),
+        Antenna::None => return None,
     };
-    on_stem(pts, attach)
+    let (pts, attach) = on_stem(pts, attach);
+    Some((pts.into_iter().map(|p| mirror(p, side)).collect(), mirror(attach, side)))
 }
 
 /// Turns a charm so its middle and its attach point both lie on the stem's line, with the
 /// attach point towards the shell, and puts its middle at the top of the stem.
-fn on_stem(pts: Vec<(f32, f32)>, attach: (f32, f32)) -> Vec<(f32, f32)> {
+fn on_stem(pts: Vec<(f32, f32)>, attach: (f32, f32)) -> Charm {
     let (mx, my) = centroid(&pts);
     let rot = (STEM.3 - STEM.1).atan2(STEM.2 - STEM.0) - (attach.1 - my).atan2(attach.0 - mx);
     let (s, c) = rot.sin_cos();
-    pts.into_iter()
-        .map(|(x, y)| {
-            let (x, y) = (x - mx, y - my);
-            (STEM.0 + x * c - y * s, STEM.1 + x * s + y * c)
-        })
-        .collect()
+    let place = |(x, y): (f32, f32)| {
+        let (x, y) = (x - mx, y - my);
+        (STEM.0 + x * c - y * s, STEM.1 + x * s + y * c)
+    };
+    (pts.into_iter().map(place).collect(), place(attach))
 }
 
 /// The faceplate (x, y, w, h) for a corner style, brought in at the sides so its corners stay
@@ -159,8 +198,13 @@ pub fn face_rect(c: Corners) -> (f32, f32, f32, f32) {
     (FACE.0 + i, FACE.1, FACE.2 - 2.0 * i, FACE.3)
 }
 
-/// The key ring at the top of the shell: centre and outer reach.
-pub const RING: (f32, f32, f32) = (CX, CY - SHELL_B - 6.0, 22.0);
+/// The key ring tab moulded on top of the shell, where a ring could go: x, y, w, h. The shell
+/// covers its lower part.
+pub const LUG: (f32, f32, f32, f32) = (CX - 17.0, CY - SHELL_B - 14.0, 34.0, 28.0);
+/// The hole through the lug: centre and radius.
+pub const LUG_HOLE: (f32, f32, f32) = (CX, CY - SHELL_B - 6.0, 4.5);
+/// A centre and a reach that covers the lug, with room to shake.
+pub const RING: (f32, f32, f32) = (CX, LUG_HOLE.1, 21.0);
 
 /// (x, y, w, h) of the ten icons: top row 0-4, bottom row 5-9.
 pub fn icon_rects() -> [(f32, f32, f32, f32); 10] {
@@ -196,16 +240,11 @@ pub fn button_at(x: f32, y: f32) -> Option<crate::Button> {
 
 /// Is a design-space point on the device (shell, antenna or key ring)?
 pub fn on_device(x: f32, y: f32, look: &Look) -> bool {
-    let antenna = antenna_points(look.antenna);
+    let side = look.antenna_side;
+    let antenna = antenna_points(look.antenna, side);
     point_in_poly(x, y, &egg_points(CX, CY, SHELL_A + 3.0, SHELL_B + 3.0, 120))
-        || (!antenna.is_empty() && point_in_poly(x, y, &antenna))
+        || (!antenna.is_empty() && (point_in_poly(x, y, &antenna) || point_in_poly(x, y, &stem_band(side, 4.0))))
         || (look.ring && ((x - RING.0).powi(2) + (y - RING.1).powi(2)).sqrt() <= RING.2)
-        || (!antenna.is_empty()
-            && x > STAR.0 - 4.0
-            && x < STAR.0 + 56.0
-            && y > STAR.1 - 4.0
-            && y < STAR.1 + 56.0
-            && (x - y).abs() < 14.0)
 }
 
 /// The middle of a polygon's area.
@@ -253,30 +292,68 @@ mod tests {
 
     #[test]
     fn every_antenna_charm_sits_centred_on_its_stem() {
-        let (dx, dy) = (STEM.2 - STEM.0, STEM.3 - STEM.1);
-        let len = (dx * dx + dy * dy).sqrt();
-        let (nx, ny) = (-dy / len, dx / len);
-        for a in Antenna::ALL.into_iter().filter(|&a| a != Antenna::None) {
-            let pts = antenna_points(a);
-            let (mx, my) = centroid(&pts);
-            assert!((mx - STEM.0).abs() < 0.01 && (my - STEM.1).abs() < 0.01, "{a:?}: middle at ({mx:.1}, {my:.1})");
-            // the stem, across its whole width, starts hidden in the charm and leaves it once,
-            // not through a hollow or a gap
-            for off in [-3.0, 0.0, 3.0] {
-                let start = (STEM.0 + nx * off, STEM.1 + ny * off);
-                let end = (STEM.2 + nx * off, STEM.3 + ny * off);
-                assert!(point_in_poly(start.0, start.1, &pts), "{a:?}: the stem shows at the charm's middle");
-                assert_eq!(crossings(start, end, &pts), 1, "{a:?}: the stem crosses the outline more than once");
-            }
-            // the window shows all of it, outline included
-            let (vx, vy, vw, vh) = VIEW;
-            for &(x, y) in &pts {
+        for side in Side::ALL {
+            let (start, end) = stem(side);
+            let (dx, dy) = (end.0 - start.0, end.1 - start.1);
+            let len = (dx * dx + dy * dy).sqrt();
+            for a in Antenna::ALL.into_iter().filter(|&a| a != Antenna::None) {
+                let (pts, attach) = antenna(a, side).unwrap();
+                let (mx, my) = centroid(&pts);
                 assert!(
-                    x > vx + 1.0 && y > vy + 1.0 && x < vx + vw - 1.0 && y < vy + vh - 1.0,
-                    "{a:?}: ({x:.1}, {y:.1})"
+                    (mx - start.0).abs() < 0.01 && (my - start.1).abs() < 0.01,
+                    "{a:?} {side:?}: middle at ({mx:.1}, {my:.1})"
                 );
+                // the stem leaves the charm once, not through a hollow or a gap, and where it
+                // meets the outline is on its line
+                assert!(point_in_poly(start.0, start.1, &pts), "{a:?} {side:?}: the stem shows at the charm's middle");
+                assert_eq!(
+                    crossings(start, end, &pts),
+                    1,
+                    "{a:?} {side:?}: the stem crosses the outline more than once"
+                );
+                let off_line = ((attach.0 - start.0) * dy - (attach.1 - start.1) * dx).abs() / len;
+                assert!(off_line < 0.01, "{a:?} {side:?}: the stem meets the charm {off_line:.2} off its line");
+                // the window shows all of it, outline included
+                let (vx, vy, vw, vh) = VIEW;
+                for &(x, y) in &pts {
+                    assert!(
+                        x > vx + 1.0 && y > vy + 1.0 && x < vx + vw - 1.0 && y < vy + vh - 1.0,
+                        "{a:?} {side:?}: ({x:.1}, {y:.1})"
+                    );
+                }
             }
         }
+        // the right is the left's mirror image
+        let left = antenna_points(Antenna::Bolt, Side::Left);
+        let right = antenna_points(Antenna::Bolt, Side::Right);
+        assert!(left.iter().zip(&right).all(|(l, r)| (l.0 + r.0 - 2.0 * CX).abs() < 0.01 && l.1 == r.1));
+    }
+
+    #[test]
+    fn the_antenna_and_key_ring_can_be_grabbed() {
+        for side in Side::ALL {
+            let look = Look { antenna_side: side, ..Look::default() };
+            let ((x0, y0), (x1, y1)) = stem(side);
+            // halfway along the stem, at its edge
+            let (mx, my) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+            let len = ((x1 - x0).powi(2) + (y1 - y0).powi(2)).sqrt();
+            let (nx, ny) = (-(y1 - y0) / len, (x1 - x0) / len);
+            let edge = STEM_W / 2.0;
+            assert!(on_device(mx + nx * edge, my + ny * edge, &look), "{side:?}");
+            assert!(on_device(mx - nx * edge, my - ny * edge, &look), "{side:?}");
+            assert!(!on_device(mx + nx * 20.0, my + ny * 20.0, &look), "{side:?}");
+            // the other side is empty
+            assert!(!on_device(2.0 * CX - mx, my, &look), "{side:?}");
+        }
+        let look = Look::default();
+        let (lx, ly, lw, _) = LUG;
+        assert!(on_device(CX, ly + 1.0, &look), "the top of the lug");
+        assert!(on_device(lx + 2.0, ly + 8.0, &look), "the lug's side");
+        assert!(!on_device(CX, ly + 1.0, &Look { ring: false, ..look }), "the lug is off");
+        // the window shows all of the lug, and its shape takes it in, shaken either way
+        assert!(ly > VIEW.1 + 1.0);
+        let corner = ((lw / 2.0 + 2.0).powi(2) + (CY - SHELL_B - RING.1).powi(2)).sqrt();
+        assert!(RING.1 - ly + 1.0 < RING.2 && corner < RING.2);
     }
 
     #[test]

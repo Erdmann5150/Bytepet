@@ -131,6 +131,20 @@ impl Antenna {
     }
 }
 
+/// Which side of the shell's top the antenna sticks out of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Side {
+    Left,
+    Right,
+}
+
+impl Side {
+    pub const ALL: [Side; 2] = [Side::Left, Side::Right];
+    pub fn name(self) -> &'static str {
+        ["LEFT", "RIGHT"][self as usize]
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Corners {
     Round,
@@ -196,6 +210,7 @@ pub struct Look {
     pub letters: bool,
     pub antenna: Antenna,
     pub antenna_color: Option<Rgb>,
+    pub antenna_side: Side,
     /// The key ring at the top of the shell.
     pub ring: bool,
     /// The panel the screen and icons sit on.
@@ -233,6 +248,7 @@ impl Look {
             letters: true,
             antenna: Antenna::Star,
             antenna_color: None,
+            antenna_side: Side::Left,
             ring: true,
             face: CREAM,
             edge: None,
@@ -291,6 +307,7 @@ impl Look {
             Field::Letters => flag(self.letters),
             Field::Antenna => Some(self.antenna as usize),
             Field::AntennaColor => auto(self.antenna_color),
+            Field::AntennaSide => Some(self.antenna_side as usize),
             Field::Ring => flag(self.ring),
             Field::Face => color(self.face),
             Field::Edge => auto(self.edge),
@@ -319,6 +336,7 @@ impl Look {
             Field::Letters => self.letters = i == 1,
             Field::Antenna => self.antenna = Antenna::ALL[i],
             Field::AntennaColor => self.antenna_color = auto,
+            Field::AntennaSide => self.antenna_side = Side::ALL[i],
             Field::Ring => self.ring = i == 1,
             Field::Face => self.face = color,
             Field::Edge => self.edge = auto,
@@ -388,7 +406,7 @@ impl Part {
         match self {
             Part::Body => &[Field::Body, Field::Pattern, Field::Accent, Field::Gloss],
             Part::Buttons => &[Field::Buttons, Field::ButtonShape, Field::Letters],
-            Part::Antenna => &[Field::Antenna, Field::AntennaColor, Field::Ring],
+            Part::Antenna => &[Field::Antenna, Field::AntennaColor, Field::AntennaSide, Field::Ring],
             Part::Screen => &[Field::Face, Field::Edge, Field::Frame, Field::Corners, Field::Lcd],
             Part::Icons => &[Field::Icons, Field::Selected, Field::Alert, Field::Name],
         }
@@ -407,6 +425,7 @@ pub enum Field {
     Letters,
     Antenna,
     AntennaColor,
+    AntennaSide,
     Ring,
     Face,
     Edge,
@@ -428,7 +447,7 @@ enum Kind {
 }
 
 impl Field {
-    pub const ALL: [Field; 19] = [
+    pub const ALL: [Field; 20] = [
         Field::Body,
         Field::Pattern,
         Field::Accent,
@@ -438,6 +457,7 @@ impl Field {
         Field::Letters,
         Field::Antenna,
         Field::AntennaColor,
+        Field::AntennaSide,
         Field::Ring,
         Field::Face,
         Field::Edge,
@@ -465,6 +485,7 @@ impl Field {
             Field::Pattern => Kind::Named(|i| Pattern::ALL[i].name(), Pattern::ALL.len()),
             Field::ButtonShape => Kind::Named(|i| ButtonShape::ALL[i].name(), ButtonShape::ALL.len()),
             Field::Antenna => Kind::Named(|i| Antenna::ALL[i].name(), Antenna::ALL.len()),
+            Field::AntennaSide => Kind::Named(|i| Side::ALL[i].name(), Side::ALL.len()),
             Field::Corners => Kind::Named(|i| Corners::ALL[i].name(), Corners::ALL.len()),
             Field::Lcd => Kind::Named(|i| Lcd::ALL[i].name(), Lcd::ALL.len()),
         }
@@ -479,6 +500,7 @@ impl Field {
             Field::Gloss => "GLOSS",
             Field::ButtonShape | Field::Antenna => "SHAPE",
             Field::Letters => "LETTERS",
+            Field::AntennaSide => "SIDE",
             Field::Ring => "RING",
             Field::Face => "FACE",
             Field::Edge => "EDGE",
