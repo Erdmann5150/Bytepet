@@ -26,13 +26,13 @@ use winit::window::{Icon, Window, WindowId, WindowLevel};
 
 use bytepet::core::{now_unix, Core};
 use bytepet::layout::{button_at, icon_at, on_device, on_lcd, VIEW};
-use bytepet::overlay::{self, Act, Choice, DesktopCmd, Env, Page};
+use bytepet::overlay::{self, DesktopCmd, Env, Page};
 use bytepet::render::{window_size, Renderer};
 use bytepet::screens::Key as ScreenKey;
 use bytepet::Button;
 
 use gfx::Gfx;
-use tray::{Flag, Tray, TrayCmd, TrayState, UserEvent};
+use tray::{Tray, TrayCmd, UserEvent};
 
 static TERMINATE: AtomicBool = AtomicBool::new(false);
 
@@ -94,20 +94,19 @@ struct App {
     gfx: Option<Gfx>,
     tray: Option<Tray>,
     tried_tray: bool,
-    /// The settings the tray menu last showed; `None` makes the next frame update it.
-    tray_state: Option<TrayState>,
     notifier: notify::Notifier,
     audio: audio::Audio,
     login: bool,
     cursor: (f64, f64),
     pressed: Option<Button>,
-    /// Where a left press on the LCD started: a click there is B, a drag moves the window.
+    /// Where a left press on the LCD (or, in the settings, anywhere off the buttons) started: a
+    /// click there is B, a drag moves the window.
     lcd_press: Option<(f64, f64)>,
     /// Windows: where in the window the drag moving it began (see `start_drag`).
     drag: Option<(f64, f64)>,
     /// Unused scroll-wheel movement, in notches.
     wheel: f64,
-    /// The menu panel the window's click-through shape currently includes.
+    /// The outline the window's click-through shape currently follows.
     shaped: Option<shape::Outline>,
     last_tick: Instant,
     visible: bool,
@@ -124,7 +123,6 @@ impl App {
             gfx: None,
             tray: None,
             tried_tray: false,
-            tray_state: None,
             notifier: notify::Notifier::new(),
             audio: audio::Audio::new(),
             login: autostart::is_enabled(),
@@ -205,7 +203,7 @@ impl App {
         if !self.opts.windowed {
             #[cfg(target_os = "windows")]
             win_frame::install(&gfx.window);
-            let outline = shape::Outline::new(&self.core.game.settings.look, None);
+            let outline = shape::Outline::new(&self.core.game.settings.look);
             shape::apply(&gfx.window, gfx.window.inner_size().width as f32 / VIEW.2, &outline);
             self.shaped = Some(outline);
         }
@@ -217,18 +215,15 @@ impl App {
         Ok(())
     }
 
-    /// While the menu is open its panel can reach past the shell, so the window's
-    /// click-through shape must include it (on Windows the shape also clips drawing). The
-    /// shape also follows the antenna and key ring, which the look can change.
+    /// The window's click-through shape follows the antenna and key ring, which the look can
+    /// change.
     fn update_shape(&mut self) {
         if self.opts.windowed {
             return;
         }
         let Some(win) = self.window() else { return };
         let size = win.inner_size();
-        let o = &self.core.overlay;
-        let panel = o.is_open().then(|| o.panel(size.width as f32, size.height as f32).pixels());
-        let want = shape::Outline::new(&self.core.game.settings.look, panel);
+        let want = shape::Outline::new(&self.core.game.settings.look);
         if Some(want) != self.shaped {
             shape::apply(win, size.width as f32 / VIEW.2, &want);
             self.shaped = Some(want);
@@ -238,11 +233,10 @@ impl App {
     fn redraw(&mut self) {
         self.update_shape();
         let wall = now_unix();
-        let env = self.env();
         let Some(win) = self.window() else { return };
         let dpi = win.scale_factor() as f32;
         let s = self.px_scale();
-        let mut pm = self.renderer.render(&self.core, s, dpi, Some(&env), wall);
+        let mut pm = self.renderer.render(&self.core, s, dpi, wall);
         if self.opts.windowed {
             // no see-through in a normal window: put the device on a dark backdrop
             if let Some(mut bg) = Pixmap::new(pm.width(), pm.height()) {
@@ -299,16 +293,19 @@ impl App {
         }
     }
 
-    fn menu_act(&mut self, act: Act) {
-        let env = self.env();
-        if let Some(cmd) = overlay::activate(&mut self.core, &env, act) {
-            self.desktop_cmd(cmd);
+    /// Carry out what the settings asked of the desktop: a command from a click or key here,
+    /// and any left by button presses (see `Core::press`).
+    fn run_cmds(&mut self, cmd: Option<DesktopCmd>) {
+        for c in cmd.into_iter().chain(self.core.overlay.take_cmds()) {
+            self.desktop_cmd(c);
         }
     }
 
-    fn choose(&mut self, c: Choice) {
-        if let Some(cmd) = overlay::choose(&mut self.core, c) {
-            self.desktop_cmd(cmd);
+    /// An arrow key in the settings: acts on every press, held keys repeating.
+    fn menu_key(&mut self, down: bool, f: impl FnOnce(&mut Core) -> Option<DesktopCmd>) {
+        if down {
+            let cmd = f(&mut self.core);
+            self.run_cmds(cmd);
         }
     }
 
@@ -321,38 +318,16 @@ impl App {
                     self.show();
                 }
             }
-            TrayCmd::Pick(c) => self.choose(c),
-            TrayCmd::Flip(f) => {
-                let s = &self.core.game.settings;
-                let c = match f {
-                    Flag::OnTop => Choice::OnTop(!s.ui.on_top),
-                    Flag::Notify => Choice::Notify(!s.ui.notify),
-                    Flag::Login => Choice::Login(!self.login),
-                };
-                self.choose(c);
-            }
-            TrayCmd::Help => {
+            TrayCmd::Settings => {
                 self.show();
-                self.core.overlay.open_help();
+                if !self.core.overlay.has_rows() {
+                    self.core.overlay.open();
+                }
             }
             TrayCmd::Quit => self.quit = true,
         }
-        // right away, as the menu may still be open
-        self.tray_state = None;
-        self.sync_tray();
         if let Some(w) = self.window() {
             w.request_redraw();
-        }
-    }
-
-    /// Show the current settings in the tray menu, if they changed.
-    fn sync_tray(&mut self) {
-        let state = TrayState::new(&self.core.game.settings, self.login);
-        if self.tray_state.as_ref() != Some(&state) {
-            if let Some(t) = &self.tray {
-                t.sync(&state);
-            }
-            self.tray_state = Some(state);
         }
     }
 
@@ -380,27 +355,22 @@ impl App {
     }
 
     /// Mouse: click A/B/C or an icon; click the screen for B, scroll for A; right-click is C,
-    /// except on the home screen with nothing selected, where it opens the menu (see
-    /// `Core::right_click`). The menu takes clicks while open.
+    /// except on the home screen with nothing selected, where it opens the settings (see
+    /// `Core::right_click`). While the settings are open the wheel picks a row, a click anywhere
+    /// but the buttons chooses it (B) and right-click goes back; the buttons work them too (see
+    /// `Core::press`).
     fn mouse(&mut self, state: ElementState, button: MouseButton) {
-        let Some(size) = self.window().map(|w| w.inner_size()) else { return };
-        let (ww, wh) = (size.width as f32, size.height as f32);
         let down = state == ElementState::Pressed;
         match (button, down) {
             (MouseButton::Right, true) => self.core.right_click(),
             (MouseButton::Left, true) => {
-                if self.core.overlay.is_open() {
-                    let env = self.env();
-                    let (px, py) = (self.cursor.0 as f32, self.cursor.1 as f32);
-                    if let Some(cmd) = overlay::click(&mut self.core, &env, px, py, ww, wh) {
-                        self.desktop_cmd(cmd);
-                    }
-                    return;
-                }
                 let (x, y) = self.to_design(self.cursor);
                 if let Some(b) = button_at(x, y) {
                     self.pressed = Some(b);
                     self.core.press(b);
+                    self.run_cmds(None);
+                } else if self.core.overlay.is_open() {
+                    self.lcd_press = Some(self.cursor);
                 } else if let Some(i) = icon_at(x, y) {
                     self.core.click_icon(i);
                 } else if on_lcd(x, y) {
@@ -416,6 +386,7 @@ impl App {
                 }
                 if self.lcd_press.take().is_some() {
                     self.core.tap(Button::B);
+                    self.run_cmds(None);
                 }
             }
             _ => {}
@@ -431,7 +402,9 @@ impl App {
         while self.wheel.abs() >= 1.0 {
             let up = self.wheel > 0.0;
             self.wheel -= if up { 1.0 } else { -1.0 };
-            if self.core.overlay.is_open() {
+            if self.core.overlay.page == Page::Help {
+                self.core.overlay.next_help();
+            } else if self.core.overlay.is_open() {
                 overlay::scroll(&mut self.core, if up { -1 } else { 1 });
             } else {
                 self.core.scroll(up);
@@ -450,37 +423,24 @@ impl App {
             _ => None,
         };
 
-        // the settings menu takes the keyboard while it's open
+        // the settings take the keyboard while they're open: the arrows move between rows and
+        // change them, and the keys for A, B and C press the device's buttons, which work them
         if self.core.overlay.is_open() {
-            if !down {
-                return;
-            }
-            if self.core.overlay.page == Page::Help {
-                match (named, ch.as_str()) {
-                    (Some(NamedKey::Escape), _) | (_, "c") => self.core.overlay.close(),
-                    _ => self.core.overlay.next_help(),
-                }
-                return;
-            }
-            let n = overlay::items(&self.core, &self.env()).len();
-            let hover = self.core.overlay.hover.unwrap_or(0);
-            match (named, ch.as_str()) {
-                (Some(NamedKey::ArrowDown), _) | (_, "z") | (_, "a") => self.core.overlay.hover = Some((hover + 1) % n),
-                (Some(NamedKey::ArrowUp), _) => self.core.overlay.hover = Some((hover + n - 1) % n),
-                (Some(NamedKey::Enter), _) | (Some(NamedKey::Space), _) | (_, "x") => {
-                    let act = overlay::items(&self.core, &self.env())[hover.min(n - 1)].act;
-                    self.menu_act(act);
-                }
-                (Some(NamedKey::ArrowLeft), _) => {
-                    let env = self.env();
-                    overlay::adjust(&mut self.core, &env, -1);
-                }
-                (Some(NamedKey::ArrowRight), _) => {
-                    let env = self.env();
-                    overlay::adjust(&mut self.core, &env, 1);
-                }
-                (Some(NamedKey::Escape), _) | (_, "c") => self.core.overlay.back(),
-                _ => {}
+            let b = match (named, ch.as_str()) {
+                (Some(NamedKey::ArrowDown), _) => return self.menu_key(down, |c| scroll_menu(c, 1)),
+                (Some(NamedKey::ArrowUp), _) => return self.menu_key(down, |c| scroll_menu(c, -1)),
+                (Some(NamedKey::ArrowLeft), _) => return self.menu_key(down, |c| overlay::adjust(c, -1)),
+                (Some(NamedKey::ArrowRight), _) => return self.menu_key(down, |c| overlay::adjust(c, 1)),
+                (_, "z" | "a" | "1" | "j") => Button::A,
+                (Some(NamedKey::Enter | NamedKey::Space), _) | (_, "x" | "s" | "2" | "k") => Button::B,
+                (Some(NamedKey::Escape | NamedKey::Backspace), _) | (_, "c" | "d" | "3" | "l") => Button::C,
+                _ => return,
+            };
+            if down && !ev.repeat {
+                self.core.press(b);
+                self.run_cmds(None);
+            } else if !down {
+                self.core.release(b);
             }
             return;
         }
@@ -563,7 +523,7 @@ impl App {
         for e in self.core.take_notices() {
             self.notifier.event(&e, &self.core.game, &self.core.content);
         }
-        self.sync_tray();
+        self.core.overlay.env = self.env();
         if self.core.ui.request.take().is_some() {
             self.show();
             self.core.overlay.open();
@@ -578,8 +538,8 @@ impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, el: &ActiveEventLoop) {
         if !self.tried_tray && !self.opts.windowed {
             self.tried_tray = true;
-            let state = TrayState::new(&self.core.game.settings, self.login);
-            self.tray = Tray::new(self.proxy.clone(), tray::icon_rgba(&self.core.content), &state);
+            self.tray = Tray::new(self.proxy.clone(), tray::icon_rgba(&self.core.content));
+            self.core.overlay.env = self.env();
         }
         if self.gfx.is_none() {
             if let Err(e) = self.create_window(el) {
@@ -605,12 +565,7 @@ impl ApplicationHandler<UserEvent> for App {
                 if let Some(g) = &self.gfx {
                     g.resize(size.width, size.height);
                     if !self.opts.windowed {
-                        let panel = self
-                            .core
-                            .overlay
-                            .is_open()
-                            .then(|| self.core.overlay.panel(size.width as f32, size.height as f32).pixels());
-                        let outline = shape::Outline::new(&self.core.game.settings.look, panel);
+                        let outline = shape::Outline::new(&self.core.game.settings.look);
                         shape::apply(&g.window, size.width as f32 / VIEW.2, &outline);
                         self.shaped = Some(outline);
                     }
@@ -630,15 +585,6 @@ impl ApplicationHandler<UserEvent> for App {
                     if !self.opts.windowed && dx * dx + dy * dy > 36.0 {
                         self.lcd_press = None;
                         self.start_drag((sx, sy));
-                    }
-                }
-                if self.core.overlay.has_rows() {
-                    if let Some(s) = self.window().map(|w| w.inner_size()) {
-                        let (x, y) = (position.x as f32, position.y as f32);
-                        let row = overlay::row_at(&self.core.overlay, x, y, s.width as f32, s.height as f32);
-                        if row.is_some() {
-                            self.core.overlay.hover = row;
-                        }
                     }
                 }
             }
@@ -700,3 +646,9 @@ fn install_signal_handlers() {
 
 #[cfg(not(unix))]
 fn install_signal_handlers() {}
+
+/// Up or down a row of the settings, for the arrow keys.
+fn scroll_menu(core: &mut Core, steps: i32) -> Option<DesktopCmd> {
+    overlay::scroll(core, steps);
+    None
+}

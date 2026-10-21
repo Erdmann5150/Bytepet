@@ -71,7 +71,7 @@ fn device_render_has_see_through_corners() {
     let mut r = Rig::with_pet(1, Stage::Adult, "g_b");
     r.frames(5);
     for &scale in &[0.4f32, 0.55, 1.0] {
-        let pm = Renderer::new().render(&r.core, scale, 1.0, None, r.wall);
+        let pm = Renderer::new().render(&r.core, scale, 1.0, r.wall);
         let (w, h) = (pm.width(), pm.height());
         let alpha = |x: u32, y: u32| pm.pixel(x, y).unwrap().alpha();
         assert_eq!(alpha(1, h - 2), 0, "bottom-left corner should be transparent");
@@ -84,10 +84,10 @@ fn device_render_has_see_through_corners() {
 fn every_shell_every_option_and_the_menu_render() {
     let mut r = Rig::with_pet(2, Stage::Teen, "teen_p");
     r.frames(3);
-    let env = bytepet::overlay::Env { login: false, hide_label: "MINIMIZE" };
+
     for shell in 0..bytepet::look::PRESETS.len() as u32 {
         r.core.game.settings.set_shell(shell);
-        let pm = Renderer::new().render(&r.core, 0.55, 1.0, Some(&env), r.wall);
+        let pm = Renderer::new().render(&r.core, 0.55, 1.0, r.wall);
         assert!(pm.width() > 100);
     }
     // every option of every part draws, and a different option draws something different
@@ -104,17 +104,29 @@ fn every_shell_every_option_and_the_menu_render() {
             let mut look = Look { body, pattern: bytepet::look::Pattern::Dots, ..Look::default() };
             look.set(f, i);
             r.core.game.settings.look = look;
-            let pm = Renderer::new().render(&r.core, 0.4, 1.0, None, r.wall);
+            let pm = Renderer::new().render(&r.core, 0.4, 1.0, r.wall);
             seen.push(pm.data().to_vec());
         }
         for i in 1..seen.len() {
             assert!(seen[i] != seen[i - 1], "{f:?} options {} and {i} look the same", i - 1);
         }
     }
-    r.core.overlay.open();
-    let pm = Renderer::new().render(&r.core, 0.4, 1.0, Some(&env), r.wall);
-    // the menu panel is drawn over the middle of the device
-    assert!(pm.pixel(pm.width() / 2, pm.height() / 2).unwrap().alpha() > 200);
+    // the settings take over the screen and leave the rest of the device as it was
+    use bytepet::layout::{BUTTONS, LCD_POS, VIEW};
+    r.core.game.settings.look = Look::default();
+    for &(_, scale) in &bytepet::overlay::SIZES {
+        r.core.overlay.close();
+        let shut = Renderer::new().render(&r.core, scale, 1.0, r.wall);
+        r.core.overlay.open();
+        let open = Renderer::new().render(&r.core, scale, 1.0, r.wall);
+        let at = |pm: &tiny_skia::Pixmap, x: f32, y: f32| {
+            pm.pixel(((x - VIEW.0) * scale) as u32, ((y - VIEW.1) * scale) as u32).unwrap()
+        };
+        let (bx, by) = (BUTTONS[0].1, BUTTONS[0].2);
+        assert_eq!(at(&shut, bx, by), at(&open, bx, by), "the settings changed button A at {scale}");
+        let lcd: Vec<_> = (0..64).map(|i| (LCD_POS.0 + 4.0 * i as f32 + 2.0, LCD_POS.1 + 6.0)).collect();
+        assert!(lcd.iter().any(|&(x, y)| at(&shut, x, y) != at(&open, x, y)), "no settings on screen at {scale}");
+    }
 }
 
 #[test]

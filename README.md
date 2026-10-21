@@ -45,18 +45,21 @@ Bytepet opens as a floating, egg-shaped device in the bottom-right corner. Click
 empty space around the egg pass through to whatever is behind it.
 
 - **Drag** the shell to move it. Bytepet remembers where you left it.
-- **Right-click** it on the home screen for the settings menu: size, shell, time speed, sound
-  volume, always on top, notifications, launch at login, help, hide and quit.
-- **Make it yours:** the menu's SHELL page has 12 preset designs, and pages for the body
+- **Right-click** it on the home screen for the settings: size, shell, time speed, sound
+  volume, always on top, notifications, launch at login, help, hide and quit. They open on the
+  device's own screen, which switches to a finer dot grid to show them, so the rest of the device
+  stays in sight while you change it. Work them with the device's buttons: **A** for the next row,
+  **B** to change or open it, **C** to go back. With the mouse, **scroll** to pick a row,
+  **click** to change or open it and **right-click** to go back. On the keyboard, up and down
+  move, and left and right change a setting either way.
+- **Make it yours:** the settings' SHELL page has 12 preset designs, and pages for the body
   (colour, pattern, pattern colour, shine), buttons (colour, shape, letters), antenna (shape,
   colour, key ring), screen (faceplate, rim, frame, corners, LCD colour) and icons (icon colour,
-  the selected icon, the alert icon and the BYTEPET text). Each part changes on its own, and
-  RANDOM changes every part at once. Click a setting for its next option, or use the left and
-  right arrow keys; right-click goes back a page. The tray menu's *Customize* submenu has the same
-  settings.
-- **Tray or menu-bar icon:** click it to show or hide the pet, or right-click it for the same
-  settings. On Windows the menu stays open while you pick settings; click outside it to close it. On Windows and macOS Bytepet has no taskbar or Dock button, so the tray icon is
-  how you bring it back after hiding it.
+  the selected icon, the alert icon and the BYTEPET text). Each part changes on its own as you
+  watch, and RANDOM changes every part at once.
+- **Tray or menu-bar icon:** click it to show or hide the pet. Its menu has *Show / hide*,
+  *Settings* (brings the pet forward with its settings open) and *Quit*. On Windows and macOS
+  Bytepet has no taskbar or Dock button, so the tray icon is how you bring it back after hiding it.
 - **Notifications** tell you when your pet calls, gets sick, hatches, grows up, gets mail or
   leaves, at most once every 2 minutes per kind.
 - **Starting Bytepet again** brings the running pet forward instead of opening a second copy.
@@ -89,7 +92,7 @@ Keys work while Bytepet has focus, so click it first.
 | Click an icon | opens it, even from inside another menu |
 | Click the screen | B |
 | Scroll wheel | down for the next option (A), up for the previous one |
-| Right-click | C; on the home screen with no icon selected, it opens the settings menu |
+| Right-click | C; on the home screen with no icon selected, it opens the settings |
 | Drag the shell or the screen | move Bytepet |
 
 A+C together or `M` mutes. `F1` opens help, `F2` cycles time speed and `F3` cycles the preset
@@ -234,7 +237,7 @@ src/
   lcd.rs font.rs  the dot-matrix screen and its font
   save.rs         versioned save files
   instance.rs     one running copy per save file
-  overlay.rs      the right-click settings menu and help pages
+  overlay.rs      the settings and help pages, shown on the device's screen
   main.rs         command line, then hands off to desktop/
   desktop/        window, tray, notifications, sound, autostart, click-through
 tests/            end-to-end flows, two-device link tests, fuzzing
