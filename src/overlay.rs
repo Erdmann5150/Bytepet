@@ -58,6 +58,9 @@ pub struct Overlay {
     pub help: usize,
     /// Facts about the desktop; the desktop shell keeps them up to date.
     pub env: Env,
+    /// RANDOM was confirmed on this visit to the SHELL page, so more presses re-roll without
+    /// asking again. Leaving the page (or the settings) puts the question back.
+    random_ok: bool,
     /// Commands from button presses (see `Core::press`) for the desktop shell to carry out.
     cmds: Vec<DesktopCmd>,
 }
@@ -215,6 +218,7 @@ impl Overlay {
         self.page = Page::Menu;
         self.hover = Some(0);
         self.help = 0;
+        self.random_ok = false;
     }
     pub fn open_help(&mut self) {
         self.page = Page::Help;
@@ -236,6 +240,7 @@ impl Overlay {
     pub fn close(&mut self) {
         self.page = Page::Closed;
         self.hover = None;
+        self.random_ok = false;
     }
     fn go(&mut self, page: Page, hover: usize) {
         self.page = page;
@@ -246,7 +251,10 @@ impl Overlay {
     pub fn back(&mut self) {
         match self.page {
             Page::Part(p) => self.go(Page::Shell, 1 + p as usize),
-            Page::Shell => self.go(Page::Menu, 1),
+            Page::Shell => {
+                self.random_ok = false;
+                self.go(Page::Menu, 1)
+            }
             Page::Themes => self.go(Page::Shell, THEMES_ROW),
             Page::Theme(i) => self.go(Page::Themes, 1 + i),
             Page::Confirm(Ask::Random) => self.go(Page::Shell, RANDOM_ROW),
@@ -295,8 +303,8 @@ pub fn activate(core: &mut Core, act: Act) -> Option<DesktopCmd> {
         Act::Preset => s.next_shell(),
         Act::Part(p) => core.overlay.go(Page::Part(p), 0),
         Act::Field(f) => s.look.step(f, 1),
-        // a look that would be lost isn't replaced without asking
-        Act::Random if s.look_unsaved() => core.overlay.go(Page::Confirm(Ask::Random), 0),
+        // the first RANDOM on each visit to the page asks; once you've said yes, it re-rolls
+        Act::Random if !core.overlay.random_ok => core.overlay.go(Page::Confirm(Ask::Random), 0),
         Act::Random => randomize(&mut s.look),
         Act::Themes => core.overlay.go(Page::Themes, 0),
         Act::SaveTheme => {
@@ -310,6 +318,7 @@ pub fn activate(core: &mut Core, act: Act) -> Option<DesktopCmd> {
         Act::Yes => match core.overlay.page {
             Page::Confirm(Ask::Random) => {
                 randomize(&mut s.look);
+                core.overlay.random_ok = true;
                 core.overlay.back();
             }
             Page::Confirm(Ask::Delete(i)) => {
@@ -756,27 +765,39 @@ mod tests {
         assert_eq!((core.overlay.page, core.overlay.hover), (Page::Menu, Some(1)));
         core.right_click();
         assert!(!core.overlay.is_open());
-        // RANDOM always changes something
+        // the first RANDOM asks, even over a preset, and NO keeps the look
         core.overlay.open();
-        core.overlay.go(Page::Shell, 0);
+        click_row(&mut core, 1); // SHELL
         core.game.settings.set_shell(2);
+        let before = core.game.settings.look;
+        click_row(&mut core, RANDOM_ROW);
+        assert_eq!((core.overlay.page, core.overlay.hover), (Page::Confirm(Ask::Random), Some(0)));
+        click_row(&mut core, 0); // NO
+        assert_eq!((core.overlay.page, core.overlay.hover), (Page::Shell, Some(RANDOM_ROW)));
+        assert_eq!(core.game.settings.look, before);
+        // it asks again, and YES rolls
+        click_row(&mut core, RANDOM_ROW);
+        click_row(&mut core, 1); // YES
+        assert_eq!((core.overlay.page, core.overlay.hover), (Page::Shell, Some(RANDOM_ROW)));
+        assert_ne!(core.game.settings.look, before);
+        // then each press re-rolls straight away, always to something new
         for _ in 0..20 {
             let before = core.game.settings.look;
-            let unsaved = core.game.settings.look_unsaved();
-            activate(&mut core, Act::Random);
-            if unsaved {
-                // a look that isn't saved anywhere: it asks first, and NO keeps it
-                assert_eq!((core.overlay.page, core.game.settings.look), (Page::Confirm(Ask::Random), before));
-                core.tap(Button::B);
-                assert_eq!((core.overlay.page, core.overlay.hover), (Page::Shell, Some(RANDOM_ROW)));
-                assert_eq!(core.game.settings.look, before);
-                activate(&mut core, Act::Random);
-                core.overlay.hover = Some(1);
-                core.tap(Button::B); // YES
-                assert_eq!((core.overlay.page, core.overlay.hover), (Page::Shell, Some(RANDOM_ROW)));
-            }
+            click_row(&mut core, RANDOM_ROW);
+            assert_eq!(core.overlay.page, Page::Shell);
             assert_ne!(core.game.settings.look, before);
         }
+        // until you leave the page, or the settings: then it asks first again
+        core.right_click();
+        click_row(&mut core, 1);
+        click_row(&mut core, RANDOM_ROW);
+        assert_eq!(core.overlay.page, Page::Confirm(Ask::Random));
+        core.overlay.close();
+        core.overlay.open();
+        click_row(&mut core, 1);
+        click_row(&mut core, RANDOM_ROW);
+        assert_eq!(core.overlay.page, Page::Confirm(Ask::Random));
+        core.overlay.go(Page::Shell, 0);
         // the scroll wheel wraps within the page
         core.overlay.go(Page::Part(Part::Antenna), 0);
         scroll(&mut core, -1);
@@ -799,10 +820,11 @@ mod tests {
         click_row(&mut core, 0); // SAVE
         assert_eq!(core.game.settings.themes, vec![mine]);
         assert_eq!((items(&core)[0].value.as_str(), items(&core)[1].label), ("SAVED", "THEME 1"));
-        // a saved look is safe: RANDOM doesn't ask
+        // a random look in its place
         core.overlay.back();
         assert_eq!(core.overlay.hover, Some(THEMES_ROW));
         click_row(&mut core, RANDOM_ROW);
+        click_row(&mut core, 1); // YES
         assert_eq!(core.overlay.page, Page::Shell);
         assert_ne!(core.game.settings.look, mine);
         assert_eq!(items(&core)[0].value, "CUSTOM");

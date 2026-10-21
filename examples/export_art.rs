@@ -169,17 +169,19 @@ fn row(devices: &[Pixmap], overlap: f32) -> Pixmap {
 
 /// The README's top image: a group shot of seven devices, each a different shell with a pet
 /// at a different stage of life, egg to senior. The middle one is biggest and in front, and
-/// the rest step down in size towards the edges. Between them they show every antenna, button
-/// shape and corner style.
+/// the rest step down in size towards the edges. Between them they show every antenna shape,
+/// button shape and corner style; every one of them has an antenna.
 fn hero(dir: &Path) {
     let preset = |name: &str| PRESETS.iter().find(|p| p.name == name).map(|p| p.look).unwrap();
+    // the purple design, with a bolt in its buttons' yellow instead of no antenna
+    let custom = Look { antenna: bytepet::look::Antenna::Bolt, ..showcase()[0] };
     // left to right, a life from egg to senior; sizes rise to the middle and fall again
     let cast = [
         (preset("FLAME"), (Stage::Egg, "egg"), 0.40),
         (preset("SWEET"), (Stage::Baby, "baby"), 0.48),
         (preset("MINT"), (Stage::Child, "child_a"), 0.56),
         (preset("COSMIC"), (Stage::Teen, "teen_g"), 0.66),
-        (showcase()[0], (Stage::Adult, "s_p"), 0.56),
+        (custom, (Stage::Adult, "s_p"), 0.56),
         (preset("ZEBRA"), (Stage::Adult, "h_a"), 0.48),
         (preset("RETRO"), (Stage::Senior, "senior"), 0.40),
     ];

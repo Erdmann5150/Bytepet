@@ -195,16 +195,17 @@ impl Pet {
             self.name.clone()
         }
     }
-    /// Something is waiting to be done for the pet: a call, poop to clean up, a sickness, an
-    /// empty heart, or the lights left on while it sleeps. The alert icon shows it. Hearts
-    /// can't be filled while it sleeps, so they don't count then.
+    /// Something is waiting to be done for the pet: a call, poop to clean up, a sickness or an
+    /// empty heart. The alert icon shows it. Hearts can't be filled while it sleeps, so they
+    /// don't count then. The lights only matter while the pet is calling about them, as it
+    /// falls asleep: once that call is answered or has timed out, lights left on are no
+    /// longer a need.
     pub fn needs_attention(&self) -> bool {
         if !self.alive() {
             return false;
         }
         let hearts = !self.asleep && (self.hunger == 0 || self.happy == 0);
-        let lights = self.asleep && self.lights;
-        self.call.is_some() || self.poop > 0 || self.sick || hearts || lights
+        self.call.is_some() || self.poop > 0 || self.sick || hearts
     }
     pub fn top_skill_value(&self) -> u32 {
         Skill::ALL.iter().map(|&s| self.skills.get(s)).max().unwrap_or(0)
@@ -346,11 +347,6 @@ impl Settings {
             ("CUSTOM", Some(i)) => format!("THEME {}", i + 1),
             (name, _) => name.into(),
         }
-    }
-
-    /// Changing the look would lose it: it is neither a preset nor a saved theme.
-    pub fn look_unsaved(&self) -> bool {
-        self.shell_name() == "CUSTOM" && self.theme().is_none()
     }
 
     /// Save the look as a theme; its index, or `None` when every slot is taken.
@@ -1406,12 +1402,11 @@ mod tests {
     #[test]
     fn themes_are_saved_numbered_and_deleted() {
         let mut s = Settings::default();
-        assert!(!s.look_unsaved(), "a preset is never lost");
         s.look.step(crate::look::Field::Ring, 1);
-        assert!(s.look_unsaved());
+        assert_eq!(s.shell_label(), "CUSTOM");
         assert_eq!(s.save_theme(), Some(0));
         assert_eq!(s.save_theme(), Some(0), "the same look isn't saved twice");
-        assert_eq!((s.shell_label(), s.look_unsaved()), ("THEME 1".to_string(), false));
+        assert_eq!(s.shell_label(), "THEME 1");
         s.look.step(crate::look::Field::Gloss, 1);
         assert_eq!(s.save_theme(), Some(1));
         let second = s.look;

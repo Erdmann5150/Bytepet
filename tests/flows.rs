@@ -3,7 +3,7 @@
 mod common;
 
 use bytepet::content::Stage;
-use bytepet::sim::{Mail, MailKind};
+use bytepet::sim::{Call, CallReason, Mail, MailKind};
 use bytepet::Button;
 use common::Rig;
 
@@ -276,12 +276,36 @@ fn the_alert_icon_shows_every_need() {
     r.core.game.pet.happy = 0;
     assert!(alert(&r), "an empty heart");
     r.core.game.pet.happy = 4;
-    // asleep with the lights on is a need; asleep in the dark isn't
-    r.core.game.pet.asleep = true;
-    assert!(alert(&r), "lights");
-    r.core.game.pet.lights = false;
+    r.frames(1);
+    assert!(!alert(&r));
+    // falling asleep with the lights on, it calls about them, and the alert shows it...
+    r.core.hour_at = |_| 23.0;
+    r.frames(1);
+    assert!(r.core.game.pet.asleep && r.core.game.pet.lights);
+    assert!(alert(&r), "the lights call");
+    // ...until the call times out (a care mistake): the lights left on aren't a need all night
+    r.core.game.settings.speed = 60;
+    let mistakes = r.core.game.pet.mistakes;
+    r.frames(30 * 20);
+    assert_eq!(r.core.game.pet.mistakes, mistakes + 1);
+    assert!(r.core.game.pet.asleep && r.core.game.pet.lights);
+    assert!(!alert(&r), "lit all night");
+    // and hearts can't be filled while it sleeps, so they don't count either
     r.core.game.pet.hunger = 0;
     assert!(!alert(&r), "hearts can't be filled while it sleeps");
+}
+
+#[test]
+fn turning_the_lights_off_answers_the_alert() {
+    let mut r = Rig::with_pet(19, Stage::Child, "child_a");
+    let alert = |r: &Rig| r.core.icon_states(0.0)[9];
+    r.core.hour_at = |_| 23.0;
+    r.frames(1);
+    assert!(alert(&r));
+    r.core.click_icon(4); // lights
+    r.frames(30);
+    assert!(!r.core.game.pet.lights);
+    assert!(!alert(&r));
 }
 
 #[test]
@@ -293,8 +317,13 @@ fn the_tray_tooltip_says_how_the_pet_is() {
     r.core.game.pet.poop = 2;
     r.core.game.pet.sick = true;
     assert!(r.core.summary().ends_with("\nNeeds food, cleaning, medicine"), "{}", r.core.summary());
+    // asleep, calling about the lights
     r.core.game.pet.asleep = true;
+    r.core.game.pet.call = Some(Call { reason: CallReason::Lights, t: 0.0 });
     assert!(r.core.summary().ends_with("\nNeeds cleaning, medicine, lights off"), "{}", r.core.summary());
+    // the call is over: the lights left on are no longer a need
+    r.core.game.pet.call = None;
+    assert!(r.core.summary().ends_with("\nNeeds cleaning, medicine"), "{}", r.core.summary());
     r.core.game.pet = Default::default();
     assert_eq!(r.core.summary(), "An egg, waiting to hatch");
 }

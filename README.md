@@ -97,7 +97,8 @@ with the attention icon and a beep, and a call left for 15 minutes counts as a c
 Clean up poop, give medicine when the skull appears (some illnesses need two doses), and
 turn the lights off once it falls asleep, or that's a care mistake too. A pet left sick or
 starving for too long goes back to its home planet. The attention icon stays lit while
-anything is waiting: a call, poop, a sickness, an empty heart, or the lights left on.
+anything is waiting: a call (falling asleep with the lights on is one), poop, a sickness or
+an empty heart.
 
 **📏 Discipline.** Sometimes your pet calls when nothing is wrong, or refuses food: SCOLD it.
 Sometimes it shows off with a little dance: PRAISE it. Getting these right fills the
@@ -178,9 +179,10 @@ The settings' **SHELL** page has 12 preset designs, plus pages for every part of
 - **Screen:** faceplate, rim, frame, corners and LCD colour
 - **Icons:** icon colour, the selected icon, the alert icon and the BYTEPET text
 
-Each part changes as you watch, and **RANDOM** changes every part at once (asking first if
-your design isn't saved). **THEMES** keeps up to 9 designs of your own: SAVE the one you're
-wearing, then pick THEME 1, THEME 2 and so on to WEAR it again or DELETE it.
+Each part changes as you watch, and **RANDOM** changes every part at once. It asks first,
+then re-rolls with each press until you leave the page. **THEMES** keeps up to 9 designs of
+your own: SAVE the one you're wearing, then pick THEME 1, THEME 2 and so on to WEAR it again
+or DELETE it.
 
 ## 💻 On your desktop
 
