@@ -131,6 +131,13 @@ pub trait Screen {
     fn wants_text(&self) -> bool {
         false
     }
+    /// Drawn over the screen below rather than in its place (a short animation over the pet).
+    fn see_through(&self) -> bool {
+        false
+    }
+    /// While a see-through screen is on top: keep this one's own animation going, without
+    /// acting on anything.
+    fn animate(&mut self, _dt: f64) {}
     fn is_main(&self) -> bool {
         false
     }

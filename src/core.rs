@@ -28,6 +28,9 @@ pub struct Core {
     pub held: [bool; 3],
     /// Buttons pressed while the settings were open: their release isn't the game's.
     menu_held: [bool; 3],
+    /// A clicked one-shot icon stays lit at least this much longer, then goes out once its
+    /// animation is over and the home screen is back.
+    unlight: Option<f64>,
     pending: VecDeque<Event>,
     sfx: Vec<Tune>,
     notices: Vec<Event>,
@@ -82,6 +85,7 @@ impl Core {
             overlay: Overlay::default(),
             held: [false; 3],
             menu_held: [false; 3],
+            unlight: None,
             pending: VecDeque::new(),
             sfx: Vec::new(),
             notices: Vec::new(),
@@ -215,6 +219,10 @@ impl Core {
             return;
         }
         self.held[b.index()] = true;
+        // the buttons on the home screen move the cursor from where it is
+        if self.at_home() {
+            self.unlight = None;
+        }
         // while the settings are open the buttons work them, not the game
         if self.overlay.is_open() {
             self.menu_held[b.index()] = true;
@@ -245,12 +253,14 @@ impl Core {
 
     /// Click one of the nine icons. From a menu this goes straight to the other menu, as
     /// long as every screen open above the main one can be left (see `Screen::leavable`).
+    /// One-shot icons (clean, lights, medicine) light up only while they act.
     pub fn click_icon(&mut self, i: usize) {
         if i >= 9 || self.stack.is_empty() || !self.stack[1..].iter().all(|s| s.leavable()) {
             return;
         }
         self.stack.truncate(1);
         self.ui.sel = i as i32;
+        self.unlight = crate::screens::main_screen::ONE_SHOT.contains(&i).then_some(0.4);
         self.with_top(|s, cx| s.activate_icon(cx, i));
     }
 
@@ -260,13 +270,10 @@ impl Core {
     }
 
     /// Right mouse button: goes up a page of the settings menu if it's open (closing it from the
-    /// top), otherwise C. Only on the home screen with no icon selected does it open the settings
-    /// menu, so the right-click that clears the last selection doesn't also open it.
+    /// top), otherwise C. It never opens the settings: that's Town > SETUP > MORE, or the tray.
     pub fn right_click(&mut self) {
         if self.overlay.is_open() {
             self.overlay.back();
-        } else if self.at_home() && self.ui.sel < 0 {
-            self.overlay.open();
         } else {
             self.tap(Button::C);
         }
@@ -362,6 +369,17 @@ impl Core {
             self.collect_events(false);
         }
         self.with_top(|s, cx| s.update(cx, dt));
+        let n = self.stack.len();
+        if n >= 2 && self.stack[n - 1].see_through() {
+            self.stack[n - 2].animate(dt);
+        }
+        if let Some(t) = self.unlight.as_mut() {
+            *t -= dt;
+            if *t <= 0.0 && self.at_home() {
+                self.unlight = None;
+                self.ui.sel = -1;
+            }
+        }
         self.render_lcd();
         let k = 1.0 - (-dt as f32 * 18.0).exp();
         for (sh, &v) in self.shade.iter_mut().zip(self.lcd.buf.iter()) {
@@ -405,6 +423,10 @@ impl Core {
         self.lcd.clear(0);
         if let Some(top) = self.stack.last() {
             let dcx = DrawCx { game: &self.game, content: &self.content, ui: &self.ui };
+            // a see-through screen draws over the one below
+            if top.see_through() && self.stack.len() >= 2 {
+                self.stack[self.stack.len() - 2].draw(&dcx, &mut self.lcd);
+            }
             top.draw(&dcx, &mut self.lcd);
         }
     }

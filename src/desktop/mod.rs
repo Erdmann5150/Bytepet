@@ -354,9 +354,8 @@ impl App {
         }
     }
 
-    /// Mouse: click A/B/C or an icon; click the screen for B, scroll for A; right-click is C,
-    /// except on the home screen with nothing selected, where it opens the settings (see
-    /// `Core::right_click`). While the settings are open the wheel picks a row, a click anywhere
+    /// Mouse: click A/B/C or an icon; click the screen for B, scroll for A; right-click is C
+    /// (see `Core::right_click`). While the settings are open the wheel picks a row, a click anywhere
     /// but the buttons chooses it (B) and right-click goes back; the buttons work them too (see
     /// `Core::press`).
     fn mouse(&mut self, state: ElementState, button: MouseButton) {
