@@ -2,7 +2,9 @@
 //!
 //! `Game::step(content, dt, hour)` advances the pet by `dt` seconds of pet time; `hour` is the
 //! local time of day (0..24), which only drives the sleep schedule. The time-speed setting
-//! multiplies `dt` but never touches the clock, so bedtime always matches the real day.
+//! multiplies `dt` but never touches the clock, so bedtime always matches the real day. The
+//! bedtime shift moves the whole schedule by whole hours of that real day, for night-shift
+//! players, and is the only thing that can.
 
 use std::collections::BTreeMap;
 
@@ -193,6 +195,17 @@ impl Pet {
             self.name.clone()
         }
     }
+    /// Something is waiting to be done for the pet: a call, poop to clean up, a sickness, an
+    /// empty heart, or the lights left on while it sleeps. The alert icon shows it. Hearts
+    /// can't be filled while it sleeps, so they don't count then.
+    pub fn needs_attention(&self) -> bool {
+        if !self.alive() {
+            return false;
+        }
+        let hearts = !self.asleep && (self.hunger == 0 || self.happy == 0);
+        let lights = self.asleep && self.lights;
+        self.call.is_some() || self.poop > 0 || self.sick || hearts || lights
+    }
     pub fn top_skill_value(&self) -> u32 {
         Skill::ALL.iter().map(|&s| self.skills.get(s)).max().unwrap_or(0)
     }
@@ -244,6 +257,12 @@ pub struct Settings {
     pub look: crate::look::Look,
     /// Keep living while the app is closed.
     pub run_away: bool,
+    /// Looks the player saved, numbered from 1 in the menus (THEME 1, THEME 2...).
+    pub themes: Vec<crate::look::Look>,
+    /// Hours the pet's bedtime and waking time move by, for players who sleep by day (see
+    /// [`Settings::pet_hour`]). It is a fixed offset from the real clock, so the time speed
+    /// still never moves bedtime.
+    pub bedtime_shift: i32,
     pub ui: UiSettings,
 }
 
@@ -256,6 +275,8 @@ impl Default for Settings {
             shell: 0,
             look: crate::look::Look::default(),
             run_away: true,
+            themes: Vec::new(),
+            bedtime_shift: 0,
             ui: UiSettings::default(),
         }
     }
@@ -263,6 +284,10 @@ impl Default for Settings {
 
 /// The volume steps the menus offer, in percent.
 pub const VOLUMES: [u32; 4] = [25, 50, 75, 100];
+/// How many looks can be saved as themes.
+pub const MAX_THEMES: usize = 9;
+/// The bedtime shifts on offer, in hours: a whole day's worth, earlier or later.
+pub const BEDTIME_SHIFTS: std::ops::RangeInclusive<i32> = -11..=12;
 
 impl Settings {
     /// The sound as the menus show it: `None` when muted, else the volume.
@@ -308,6 +333,66 @@ impl Settings {
     /// "OFF" or the volume, e.g. "75%".
     pub fn sound_label(&self) -> String {
         self.sound().map_or("OFF".into(), |v| format!("{v}%"))
+    }
+
+    /// The saved theme the device is wearing, if any.
+    pub fn theme(&self) -> Option<usize> {
+        self.themes.iter().position(|t| *t == self.look)
+    }
+
+    /// [`Settings::shell_name`], or the saved theme a custom look is, e.g. "THEME 2".
+    pub fn shell_label(&self) -> String {
+        match (self.shell_name(), self.theme()) {
+            ("CUSTOM", Some(i)) => format!("THEME {}", i + 1),
+            (name, _) => name.into(),
+        }
+    }
+
+    /// Changing the look would lose it: it is neither a preset nor a saved theme.
+    pub fn look_unsaved(&self) -> bool {
+        self.shell_name() == "CUSTOM" && self.theme().is_none()
+    }
+
+    /// Save the look as a theme; its index, or `None` when every slot is taken.
+    pub fn save_theme(&mut self) -> Option<usize> {
+        if let Some(i) = self.theme() {
+            return Some(i);
+        }
+        if self.themes.len() >= MAX_THEMES {
+            return None;
+        }
+        self.themes.push(self.look);
+        Some(self.themes.len() - 1)
+    }
+
+    pub fn wear_theme(&mut self, i: usize) {
+        if let Some(t) = self.themes.get(i) {
+            self.look = *t;
+        }
+    }
+
+    /// The device keeps wearing the look; it just isn't saved any more.
+    pub fn delete_theme(&mut self, i: usize) {
+        if i < self.themes.len() {
+            self.themes.remove(i);
+        }
+    }
+
+    /// The hour of the pet's own day for a local hour: bedtime comes `bedtime_shift` hours
+    /// later than the content says (earlier when negative).
+    pub fn pet_hour(&self, hour: f64) -> f64 {
+        (hour - self.bedtime_shift as f64).rem_euclid(24.0)
+    }
+
+    /// An hour later, round to the earliest after the latest.
+    pub fn next_bedtime_shift(&mut self) {
+        let s = self.bedtime_shift + 1;
+        self.bedtime_shift = if BEDTIME_SHIFTS.contains(&s) { s } else { *BEDTIME_SHIFTS.start() };
+    }
+
+    /// "+0H", "+8H", "-3H".
+    pub fn bedtime_label(&self) -> String {
+        format!("{:+}H", self.bedtime_shift)
     }
 }
 
@@ -434,6 +519,9 @@ impl Game {
         if ![1, 10, 60, 600].contains(&self.settings.speed) {
             self.settings.speed = 1;
         }
+        let s = &mut self.settings;
+        s.bedtime_shift = s.bedtime_shift.clamp(*BEDTIME_SHIFTS.start(), *BEDTIME_SHIFTS.end());
+        s.themes.truncate(MAX_THEMES);
     }
 
     fn fresh_pet(&mut self, c: &Content, gen: u32, mystic: bool, legacy: Option<&Skills>) -> Pet {
@@ -464,6 +552,7 @@ impl Game {
         if self.pet.stage == Stage::Gone || dt <= 0.0 {
             return;
         }
+        let hour = self.settings.pet_hour(hour);
         self.pet.t += dt;
         self.pet.stage_s += dt;
         if self.pet.stage == Stage::Egg {
@@ -1277,6 +1366,67 @@ mod tests {
             g.step(&c, 60.0, NOON);
             assert!(!g.pet.asleep);
         }
+    }
+
+    #[test]
+    fn the_bedtime_shift_moves_the_schedule_and_speed_still_doesnt() {
+        // a child sleeps 20:00-08:00; shifted 12 hours, it sleeps 08:00-20:00 instead
+        let (c, mut g) = game();
+        g.pet.stage = Stage::Child;
+        g.pet.character = "child_a".into();
+        g.settings.bedtime_shift = 12;
+        care(&mut g, &c);
+        g.step(&c, 1.0, 23.0);
+        assert!(!g.pet.asleep, "awake through the player's night");
+        g.step(&c, 1.0, 8.5);
+        assert!(g.pet.asleep, "asleep through the player's day");
+        g.step(&c, 1.0, 20.0);
+        assert!(!g.pet.asleep);
+        // at 600x, a whole pet-day at the player's midnight: never asleep
+        for _ in 0..1440 {
+            care(&mut g, &c);
+            g.step(&c, 60.0, 0.0);
+            assert!(!g.pet.asleep);
+        }
+        // the menu steps an hour at a time, round the whole day
+        let mut s = Settings::default();
+        let mut seen = Vec::new();
+        for _ in 0..BEDTIME_SHIFTS.count() {
+            s.next_bedtime_shift();
+            seen.push(s.bedtime_shift);
+        }
+        assert_eq!(s.bedtime_shift, 0);
+        assert_eq!((seen[0], seen[11], seen[12]), (1, 12, -11));
+        assert_eq!(s.bedtime_label(), "+0H");
+        assert_eq!(s.pet_hour(1.0), 1.0);
+        s.bedtime_shift = -3;
+        assert_eq!((s.bedtime_label(), s.pet_hour(22.0)), ("-3H".to_string(), 1.0));
+    }
+
+    #[test]
+    fn themes_are_saved_numbered_and_deleted() {
+        let mut s = Settings::default();
+        assert!(!s.look_unsaved(), "a preset is never lost");
+        s.look.step(crate::look::Field::Ring, 1);
+        assert!(s.look_unsaved());
+        assert_eq!(s.save_theme(), Some(0));
+        assert_eq!(s.save_theme(), Some(0), "the same look isn't saved twice");
+        assert_eq!((s.shell_label(), s.look_unsaved()), ("THEME 1".to_string(), false));
+        s.look.step(crate::look::Field::Gloss, 1);
+        assert_eq!(s.save_theme(), Some(1));
+        let second = s.look;
+        s.wear_theme(0);
+        assert_eq!(s.shell_label(), "THEME 1");
+        s.delete_theme(0);
+        assert_eq!(s.themes, vec![second]);
+        assert_eq!(s.shell_label(), "CUSTOM", "still worn, no longer saved");
+        while s.themes.len() < MAX_THEMES {
+            s.look.step(crate::look::Field::Body, 1);
+            s.save_theme();
+        }
+        s.look.step(crate::look::Field::Body, 1);
+        assert_eq!(s.save_theme(), None);
+        assert_eq!(s.themes.len(), MAX_THEMES);
     }
 
     #[test]

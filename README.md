@@ -12,7 +12,7 @@ all on a little see-through handheld that sits in the corner of your screen.
 ![Windows · macOS · Linux](https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-3a3e3a)
 ![Made with Rust](https://img.shields.io/badge/made%20with-Rust-b7410e?logo=rust)
 
-<img src="docs/screenshot.png" alt="Three Bytepets in different shells" width="760">
+<img src="docs/readme/hero.png" alt="Bytepets in a range of shells, from egg to senior" width="760">
 
 [**Download**](#-get-bytepet) · [**How it plays**](#-how-it-plays) · [**Linking**](#-link-up-with-a-friend) · [**Controls**](#-controls) · [**Modding**](#-modding) · [**Building**](#-for-developers)
 
@@ -29,7 +29,7 @@ instead of infrared.
 - 🕹️ **12 LCD mini-games** for training, jobs and head-to-head play
 - 🏫 **School, careers and mail** that change as your pet grows
 - 💞 **Link with friends on your LAN** to visit, play, trade gifts and get married
-- 🎨 **12 preset shells** and a full customiser for every part of the device
+- 🎨 **12 preset shells**, a full customiser for every part of the device, and up to 9 saved themes
 - 🪶 **One small program**: no installer needed, no account, nothing running in the cloud
 
 > [!NOTE]
@@ -80,6 +80,9 @@ Time runs in real time and follows your computer's clock, so your pet sleeps at 
 also keeps going while Bytepet is closed, for up to 14 days. To pause it instead, set
 *Town → Setup → WHEN OFF* to PAUSE.
 
+🌙 If you sleep by day, *Town → Setup → BEDTIME* moves your pet's whole day by up to 12 hours
+either way: at +8H, a child that would sleep from 20:00 to 08:00 sleeps from 04:00 to 16:00.
+
 | Stage | Length | What happens |
 |---|---|---|
 | 🥚 **Egg** | 1 minute | Name your pet first |
@@ -93,7 +96,8 @@ also keeps going while Bytepet is closed, for up to 14 days. To pause it instead
 with the attention icon and a beep, and a call left for 15 minutes counts as a care mistake.
 Clean up poop, give medicine when the skull appears (some illnesses need two doses), and
 turn the lights off once it falls asleep, or that's a care mistake too. A pet left sick or
-starving for too long goes back to its home planet.
+starving for too long goes back to its home planet. The attention icon stays lit while
+anything is waiting: a call, poop, a sickness, an empty heart, or the lights left on.
 
 **📏 Discipline.** Sometimes your pet calls when nothing is wrong, or refuses food: SCOLD it.
 Sometimes it shows off with a little dance: PRAISE it. Getting these right fills the
@@ -115,7 +119,7 @@ quiz and WORK appears in the game menu, playable once every 2 hours. **Office**,
 matchmaker), the friends list, an album of past generations, and setup.
 
 Speeds of 10×, 60× and 600× are there for trying things out. While one is on, a badge
-above the screen shows it.
+above the screen shows it. The time speed never moves bedtime.
 
 <div align="center">
 <img src="docs/readme/screens.png" alt="Feeding, the hunger meter, the CLIMB and TUG games, a school quiz, a link visit, a wedding and evolving" width="760">
@@ -131,14 +135,18 @@ Both computers need to be on the same network.
    and type the address shown on the host's screen.
 3. Both screens show the same 4-digit code. If it matches, press **B on the host** to
    accept, or C to refuse. Nothing is exchanged before that.
-4. The host picks one of four things to do:
+4. You take turns, the host first. Whoever's turn it is picks one of four things to do, and
+   when it's done the turn passes to the other side:
 
 | Action | What happens |
 |---|---|
 | 👋 **VISIT** | The pets meet and their friendship goes up. |
 | 🕹️ **GAME** | EATS, FLAGS or BUMP. Both sides play the same round and the scores are compared. |
 | 🎁 **GIFT** | Send an item or 100 GP. |
-| 💍 **MARRY** | Needs SOULMATE friendship (10 link-ups) and two eligible adults, or two seniors. Both players get the next-generation egg. |
+| 💍 **MARRY** | Needs SOULMATE friendship (10 visits, games or gifts) and two eligible adults, or two seniors. Both players get the next-generation egg, and the link ends. |
+
+Either side can leave with C. Both copies need to be up to date: linking with one from before
+turn-taking shows OTHER VERSION.
 
 <details>
 <summary><b>Network details and troubleshooting</b></summary>
@@ -156,8 +164,8 @@ To try linking on one computer, run two copies with different saves:
 ## 🎨 Make it yours
 
 <div align="center">
-<img src="docs/readme/shells.png" alt="The twelve preset shells" width="760">
-<br><sub>BERRY · LIME · OCEAN · GRAPE · ZEBRA · FLAME · DONUT · CAMO · COSMIC · SWEET · MINT · RETRO</sub>
+<img src="docs/readme/shells.png" alt="The twelve preset shells, then two designs of your own" width="760">
+<br><sub>BERRY · LIME · OCEAN · GRAPE · ZEBRA · FLAME · DONUT · CAMO · COSMIC · SWEET · MINT · RETRO, then two of your own</sub>
 </div>
 
 <br>
@@ -170,7 +178,9 @@ The settings' **SHELL** page has 12 preset designs, plus pages for every part of
 - **Screen:** faceplate, rim, frame, corners and LCD colour
 - **Icons:** icon colour, the selected icon, the alert icon and the BYTEPET text
 
-Each part changes as you watch, and **RANDOM** changes every part at once.
+Each part changes as you watch, and **RANDOM** changes every part at once (asking first if
+your design isn't saved). **THEMES** keeps up to 9 designs of your own: SAVE the one you're
+wearing, then pick THEME 1, THEME 2 and so on to WEAR it again or DELETE it.
 
 ## 💻 On your desktop
 
@@ -178,7 +188,7 @@ Bytepet opens as a floating, egg-shaped device in the bottom-right corner. Click
 empty space around the egg go through to whatever is behind it.
 
 - **Drag** the shell to move it. Bytepet remembers where you left it.
-- **Settings:** the everyday ones (speed, sound, shell) are in Town > SETUP, and **MORE**
+- **Settings:** the everyday ones (speed, sound, shell, bedtime) are in Town > SETUP, and **MORE**
   there opens all of them: size, shell, time speed, sound volume, always on top,
   notifications, launch at login, help, hide and quit. They open on the device's own
   screen, which switches to a finer dot grid to show them, so the rest of the device stays
@@ -186,7 +196,10 @@ empty space around the egg go through to whatever is behind it.
   change or open it, **C** to go back. With the mouse, **scroll** to pick a row, **click**
   to change or open it and **right-click** to go back. On the keyboard, up and down move,
   and left and right change a setting either way.
-- **Tray or menu-bar icon:** click it to show or hide the pet. Its menu has *Show / hide*,
+- **Left alone,** a menu or the settings go back to the home screen after a minute, and a
+  highlighted icon goes out after 30 seconds. Games, animations and links are never cut short.
+- **Tray or menu-bar icon:** hover over it to see how your pet is doing (its hearts and what
+  it needs), and click it to show or hide the pet. Its menu has *Show / hide*,
   *Settings* (brings the pet forward with its settings open) and *Quit*. On Windows and
   macOS Bytepet has no taskbar or Dock button, so the tray icon is how you bring it back
   after hiding it.
@@ -239,10 +252,11 @@ preset shells. When the game asks for a name or an IP address, type it on your k
 | macOS | `~/Library/Application Support/Bytepet/save.json` |
 | Linux | `~/.local/share/bytepet/save.json` (or under `$XDG_DATA_HOME`) |
 
-`bytepet --paths` prints the exact locations. The game saves every 20 seconds and on exit,
-and a crash can't leave the file half-written. If the save is damaged, it's renamed to
-`save.json.corrupt` and a new egg starts. A save from a newer version is played but never
-overwritten.
+`bytepet --paths` prints the exact locations. The game saves every 20 seconds and on exit.
+Each save is flushed to disk before it replaces the last one, so neither a crash nor a power
+cut can leave it half-written, and the save before it is kept as `save.json.bak`. If the save
+is damaged, it's renamed to `save.json.corrupt` and Bytepet carries on from the backup (or,
+without one, a new egg starts). A save from a newer version is played but never overwritten.
 
 ## 🧩 Modding
 
@@ -277,7 +291,7 @@ feature.
 
 ### Building from source
 
-You need Rust 1.80 or newer from [rustup.rs](https://rustup.rs). On Linux you also need the
+You need Rust 1.89 or newer from [rustup.rs](https://rustup.rs). On Linux you also need the
 ALSA headers: `sudo apt install libasound2-dev pkg-config` (Debian, Ubuntu) or
 `sudo dnf install alsa-lib-devel` (Fedora).
 
@@ -296,7 +310,8 @@ To build the manual and quick reference PDFs, export the art as above, then run 
 python3 tools/build_manual.py art/ dist/
 ```
 
-CI runs the tests on all three platforms, lints, and builds the packages and the two PDFs.
+CI runs the tests and Clippy on all three platforms, checks the build with the oldest
+supported Rust (Cargo.toml's `rust-version`), and builds the packages and the two PDFs.
 Pushing a tag such as `v2.1.0` publishes a GitHub release with all of them attached.
 
 ### Project layout
@@ -313,7 +328,7 @@ src/
   render.rs       draws the device; layout.rs has its geometry
   look.rs         the customisable look: colours, shapes, patterns and the preset shells
   lcd.rs font.rs  the dot-matrix screen and its font
-  save.rs         versioned save files
+  save.rs         versioned save files, flushed to disk, with a backup
   instance.rs     one running copy per save file
   overlay.rs      the settings and help pages, shown on the device's screen
   main.rs         command line, then hands off to desktop/
