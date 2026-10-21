@@ -18,6 +18,9 @@ pub const BUTTONS: [(crate::Button, f32, f32); 3] =
     [(crate::Button::A, 142.0, 482.0), (crate::Button::B, 220.0, 500.0), (crate::Button::C, 298.0, 482.0)];
 pub const BTN_R: f32 = 25.0;
 pub const STAR: (f32, f32) = (70.0, 70.0);
+/// The antenna's stem, from the charm's middle (x, y) to its end inside the shell. It is drawn
+/// only outside the charm, so it meets each charm's outline wherever that falls.
+pub const STEM: (f32, f32, f32, f32) = (STAR.0, STAR.1, STAR.0 + 48.0, STAR.1 + 52.0);
 /// The part of the canvas the widget window shows: x, y, w, h.
 pub const VIEW: (f32, f32, f32, f32) = (2.0, 26.0, 436.0, 560.0);
 
@@ -68,10 +71,6 @@ pub fn star_points_at(cx: f32, cy: f32, outer: f32, inner: f32, rot: f32) -> Vec
         .collect()
 }
 
-pub fn star_points() -> Vec<(f32, f32)> {
-    star_points_at(STAR.0, STAR.1, 34.0, 15.0, -0.35)
-}
-
 /// A heart about `2 * r` wide around (cx, cy), turned by `rot` radians.
 pub fn heart_points(cx: f32, cy: f32, r: f32, rot: f32) -> Vec<(f32, f32)> {
     let k = r / 16.0;
@@ -101,17 +100,18 @@ pub fn circle_points(cx: f32, cy: f32, r: f32, n: usize) -> Vec<(f32, f32)> {
 /// The antenna's outline; empty for none. Every shape fits within the original star's reach,
 /// so the window shape and hit-testing only have to follow the outline.
 pub fn antenna_points(a: Antenna) -> Vec<(f32, f32)> {
-    let (cx, cy) = STAR;
-    let turn = |pts: Vec<(f32, f32)>, rot: f32| -> Vec<(f32, f32)> {
-        let (s, c) = rot.sin_cos();
-        pts.into_iter().map(|(x, y)| (cx + x * c - y * s, cy + x * s + y * c)).collect()
-    };
-    match a {
-        Antenna::Star => star_points(),
-        Antenna::Heart => heart_points(cx, cy, 30.0, -0.3),
-        Antenna::Ball => circle_points(cx, cy, 25.0, 40),
+    // each charm is drawn upright, with the point where the stem should meet it
+    let (pts, attach) = match a {
+        Antenna::Star => (star_points_at(0.0, 0.0, 34.0, 15.0, 0.0), (0.0, 15.0)),
+        Antenna::Heart => {
+            let pts = heart_points(0.0, 0.0, 30.0, 0.0);
+            let tip = pts[pts.len() / 2];
+            (pts, tip)
+        }
+        Antenna::Ball => (circle_points(0.0, 0.0, 25.0, 40), (0.0, 25.0)),
         Antenna::Moon => {
-            // a disc of radius 31 with one of radius 25 taken out of it, 16 units off-centre
+            // a disc of radius 31 with one of radius 25 taken out of it, 16 units off-centre;
+            // the stem meets the middle of its back
             let (big, small, d) = (31.0f32, 25.0f32, 16.0f32);
             let ix = (d * d + big * big - small * small) / (2.0 * d);
             let iy = (big * big - ix * ix).sqrt();
@@ -121,20 +121,35 @@ pub fn antenna_points(a: Antenna) -> Vec<(f32, f32)> {
             let mut pts = Vec::new();
             for i in 0..=n {
                 let t = a0 + (std::f32::consts::TAU - 2.0 * a0) * i as f32 / n as f32;
-                pts.push((big * t.cos() - 4.0, big * t.sin()));
+                pts.push((big * t.cos(), big * t.sin()));
             }
             for i in 0..=n {
                 let t = (std::f32::consts::TAU - b0) - (std::f32::consts::TAU - 2.0 * b0) * i as f32 / n as f32;
-                pts.push((d + small * t.cos() - 4.0, small * t.sin()));
+                pts.push((d + small * t.cos(), small * t.sin()));
             }
-            turn(pts, -0.8)
+            (pts, (-big, 0.0))
         }
         Antenna::Bolt => {
             let pts = [(0.35, -1.0), (-0.6, 0.15), (-0.05, 0.15), (-0.35, 1.0), (0.65, -0.2), (0.1, -0.2)];
-            turn(pts.iter().map(|&(x, y)| (x * 34.0, y * 34.0)).collect(), 0.35)
+            (pts.iter().map(|&(x, y)| (x * 34.0, y * 34.0)).collect(), (-0.35 * 34.0, 34.0))
         }
-        Antenna::None => Vec::new(),
-    }
+        Antenna::None => return Vec::new(),
+    };
+    on_stem(pts, attach)
+}
+
+/// Turns a charm so its middle and its attach point both lie on the stem's line, with the
+/// attach point towards the shell, and puts its middle at the top of the stem.
+fn on_stem(pts: Vec<(f32, f32)>, attach: (f32, f32)) -> Vec<(f32, f32)> {
+    let (mx, my) = centroid(&pts);
+    let rot = (STEM.3 - STEM.1).atan2(STEM.2 - STEM.0) - (attach.1 - my).atan2(attach.0 - mx);
+    let (s, c) = rot.sin_cos();
+    pts.into_iter()
+        .map(|(x, y)| {
+            let (x, y) = (x - mx, y - my);
+            (STEM.0 + x * c - y * s, STEM.1 + x * s + y * c)
+        })
+        .collect()
 }
 
 /// The faceplate (x, y, w, h) for a corner style, brought in at the sides so its corners stay
@@ -193,6 +208,20 @@ pub fn on_device(x: f32, y: f32, look: &Look) -> bool {
             && (x - y).abs() < 14.0)
 }
 
+/// The middle of a polygon's area.
+pub fn centroid(pts: &[(f32, f32)]) -> (f32, f32) {
+    let (mut a, mut cx, mut cy) = (0.0, 0.0, 0.0);
+    for i in 0..pts.len() {
+        let (x0, y0) = pts[i];
+        let (x1, y1) = pts[(i + 1) % pts.len()];
+        let k = x0 * y1 - x1 * y0;
+        a += k;
+        cx += (x0 + x1) * k;
+        cy += (y0 + y1) * k;
+    }
+    (cx / (3.0 * a), cy / (3.0 * a))
+}
+
 pub fn point_in_poly(x: f32, y: f32, pts: &[(f32, f32)]) -> bool {
     let mut inside = false;
     let mut j = pts.len() - 1;
@@ -210,6 +239,45 @@ pub fn point_in_poly(x: f32, y: f32, pts: &[(f32, f32)]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// How many times a segment crosses a closed outline.
+    fn crossings(a: (f32, f32), b: (f32, f32), pts: &[(f32, f32)]) -> usize {
+        let side = |p: (f32, f32), q: (f32, f32), r: (f32, f32)| (q.0 - p.0) * (r.1 - p.1) - (q.1 - p.1) * (r.0 - p.0);
+        (0..pts.len())
+            .filter(|&i| {
+                let (p, q) = (pts[i], pts[(i + 1) % pts.len()]);
+                (side(a, b, p) > 0.0) != (side(a, b, q) > 0.0) && (side(p, q, a) > 0.0) != (side(p, q, b) > 0.0)
+            })
+            .count()
+    }
+
+    #[test]
+    fn every_antenna_charm_sits_centred_on_its_stem() {
+        let (dx, dy) = (STEM.2 - STEM.0, STEM.3 - STEM.1);
+        let len = (dx * dx + dy * dy).sqrt();
+        let (nx, ny) = (-dy / len, dx / len);
+        for a in Antenna::ALL.into_iter().filter(|&a| a != Antenna::None) {
+            let pts = antenna_points(a);
+            let (mx, my) = centroid(&pts);
+            assert!((mx - STEM.0).abs() < 0.01 && (my - STEM.1).abs() < 0.01, "{a:?}: middle at ({mx:.1}, {my:.1})");
+            // the stem, across its whole width, starts hidden in the charm and leaves it once,
+            // not through a hollow or a gap
+            for off in [-3.0, 0.0, 3.0] {
+                let start = (STEM.0 + nx * off, STEM.1 + ny * off);
+                let end = (STEM.2 + nx * off, STEM.3 + ny * off);
+                assert!(point_in_poly(start.0, start.1, &pts), "{a:?}: the stem shows at the charm's middle");
+                assert_eq!(crossings(start, end, &pts), 1, "{a:?}: the stem crosses the outline more than once");
+            }
+            // the window shows all of it, outline included
+            let (vx, vy, vw, vh) = VIEW;
+            for &(x, y) in &pts {
+                assert!(
+                    x > vx + 1.0 && y > vy + 1.0 && x < vx + vw - 1.0 && y < vy + vh - 1.0,
+                    "{a:?}: ({x:.1}, {y:.1})"
+                );
+            }
+        }
+    }
 
     #[test]
     fn the_faceplate_stays_on_the_shell_with_every_corner_style() {
