@@ -13,6 +13,9 @@ use super::care::{
 use super::town::TownMenu;
 use super::{back, boxed, msg, Ctx, DrawCx, NameEntry, Res, Screen, Tr};
 
+/// Icons that do one thing and are done (clean, lights, medicine), rather than open a menu.
+pub const ONE_SHOT: [usize; 3] = [2, 4, 5];
+
 pub struct MainScreen {
     x: f64,
     flip: bool,
@@ -107,6 +110,9 @@ impl Screen for MainScreen {
     fn is_main(&self) -> bool {
         true
     }
+    fn animate(&mut self, dt: f64) {
+        self.t += dt;
+    }
     fn activate_icon(&mut self, cx: &mut Ctx, i: usize) -> Tr {
         self.activate(cx, i)
     }
@@ -178,11 +184,13 @@ impl Screen for MainScreen {
                 cx.play(Tune::Call);
             }
         }
-        // wander
+        // wander; poop or sickness can corner the pet at any time, and it stays there once
+        // they're gone rather than jumping back
+        let hi = MainScreen::max_x(cx.game.pet.poop, cx.game.pet.sick);
+        self.x = self.x.min(hi);
         self.move_t += dt;
         if self.move_t >= 0.7 && cx.game.pet.awake() {
             self.move_t = 0.0;
-            let hi = MainScreen::max_x(cx.game.pet.poop, cx.game.pet.sick);
             let r = cx.game.rng.f64();
             if r < 0.25 {
                 self.flip = !self.flip;

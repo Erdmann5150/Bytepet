@@ -45,8 +45,8 @@ Bytepet opens as a floating, egg-shaped device in the bottom-right corner. Click
 empty space around the egg pass through to whatever is behind it.
 
 - **Drag** the shell to move it. Bytepet remembers where you left it.
-- **Right-click** it on the home screen for the settings: size, shell, time speed, sound
-  volume, always on top, notifications, launch at login, help, hide and quit. They open on the
+- **Settings:** the everyday ones (speed, sound, shell) are in Town > SETUP, and **MORE** there
+  opens all of them: size, shell, time speed, sound volume, always on top, notifications, launch at login, help, hide and quit. They open on the
   device's own screen, which switches to a finer dot grid to show them, so the rest of the device
   stays in sight while you change it. Work them with the device's buttons: **A** for the next row,
   **B** to change or open it, **C** to go back. With the mouse, **scroll** to pick a row,
@@ -92,7 +92,7 @@ Keys work while Bytepet has focus, so click it first.
 | Click an icon | opens it, even from inside another menu |
 | Click the screen | B |
 | Scroll wheel | down for the next option (A), up for the previous one |
-| Right-click | C; on the home screen with no icon selected, it opens the settings |
+| Right-click | C: back, or clear the selected icon |
 | Drag the shell or the screen | move Bytepet |
 
 A+C together or `M` mutes. `F1` opens help, `F2` cycles time speed and `F3` cycles the preset

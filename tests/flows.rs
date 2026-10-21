@@ -244,25 +244,87 @@ fn scroll_wheel_moves_through_menus_both_ways() {
 }
 
 #[test]
-fn right_click_clears_the_selection_before_opening_settings() {
+fn right_click_on_the_home_screen_is_c_not_the_settings() {
     let mut r = Rig::with_pet(12, Stage::Child, "child_a");
     r.core.click_icon(1); // food
     r.core.right_click(); // back out of the food menu
     r.frames(1);
     assert!(r.core.at_home());
     assert_eq!(r.core.ui.sel, 1);
-    r.core.right_click(); // clears the highlighted icon, no settings menu yet
+    r.core.right_click(); // clears the highlighted icon
     assert_eq!(r.core.ui.sel, -1);
+    r.core.right_click(); // nothing selected: still just C, the settings stay shut
+    r.frames(1);
     assert!(!r.core.overlay.is_open());
-    r.core.right_click(); // nothing selected: now it's the settings menu
-    assert!(r.core.overlay.is_open());
-    r.core.right_click(); // and right-click closes it again
-    assert!(!r.core.overlay.is_open());
-    // an icon picked with A is cleared the same way
-    r.tap(Button::A);
+    assert!(r.core.at_home());
+    assert_eq!(r.core.ui.sel, -1);
+    // once open (Town > SETUP > MORE, or the tray), right-click closes them
+    r.core.overlay.open();
     r.core.right_click();
     assert!(!r.core.overlay.is_open());
+}
+
+#[test]
+fn clicked_one_shot_icons_light_only_while_they_act() {
+    let mut r = Rig::with_pet(14, Stage::Child, "child_a");
+    let lit = |r: &Rig| r.core.icon_states(0.0);
+    // clean: lit for the whole flush, out once it's over
+    r.core.click_icon(2);
+    r.frames(1);
+    assert_eq!(r.top(), "Flush");
+    assert!(lit(&r)[2]);
+    assert!(r.until("Main", 90));
+    r.frames(1);
+    assert!(!lit(&r)[2]);
     assert_eq!(r.core.ui.sel, -1);
+    // lights: a brief flash, as there's no animation
+    r.core.click_icon(4);
+    r.frames(1);
+    assert!(lit(&r)[4]);
+    r.frames(15);
+    assert!(!lit(&r)[4]);
+    r.core.click_icon(4);
+    // medicine when not sick: lit through the head shake
+    r.core.click_icon(5);
+    r.frames(1);
+    assert!(lit(&r)[5]);
+    assert!(r.until("Main", 150));
+    r.frames(1);
+    assert!(!lit(&r)[5]);
+    // a menu icon stays lit after its menu closes
+    r.core.click_icon(1);
+    r.tap(Button::C);
+    assert!(r.core.at_home());
+    r.frames(30);
+    assert!(lit(&r)[1]);
+    // and the buttons leave the cursor where they put it
+    r.tap(Button::A); // from food to clean
+    r.tap(Button::B);
+    assert_eq!(r.top(), "Flush");
+    assert!(r.until("Main", 90));
+    r.frames(30);
+    assert_eq!(r.core.ui.sel, 2);
+}
+
+#[test]
+fn the_flush_wave_crosses_the_home_screen_as_it_is() {
+    let mut r = Rig::with_pet(15, Stage::Child, "child_a");
+    r.frames(1);
+    // three poops corner the pet at the left
+    r.core.game.pet.poop = 3;
+    r.frames(1);
+    let home = r.core.lcd.clone();
+    r.core.click_icon(2);
+    r.frames(1);
+    assert_eq!(r.top(), "Flush");
+    // the pet stays where it was, in the same pose, ahead of the wave
+    for x in 0..16 {
+        for y in 0..16 {
+            assert_eq!(r.core.lcd.get(x, y), home.get(x, y), "({x}, {y}) changed when the flush started");
+        }
+    }
+    assert!(r.until("Main", 90));
+    assert_eq!(r.core.game.pet.poop, 0);
 }
 
 #[test]

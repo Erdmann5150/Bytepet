@@ -129,7 +129,7 @@ impl Screen for Eat {
     }
 }
 
-/// Flushing the poop away.
+/// Flushing the poop away: a wave crosses the home screen, right to left, taking the poop with it.
 pub struct Flush {
     poops: u8,
     t: f64,
@@ -148,6 +148,9 @@ impl Screen for Flush {
     fn name(&self) -> &'static str {
         "Flush"
     }
+    fn see_through(&self) -> bool {
+        true
+    }
     fn update(&mut self, cx: &mut Ctx, dt: f64) -> Tr {
         if !self.started {
             self.started = true;
@@ -161,14 +164,17 @@ impl Screen for Flush {
         }
     }
     fn draw(&self, cx: &DrawCx, lcd: &mut Lcd) {
-        let c = cx.content;
+        // the home screen, already clean, is drawn underneath; the poop stays until the wave
+        // reaches it
         let edge = (32.0 - self.t * 26.0) as i32;
-        lcd.draw(c.sprite(&cx.game.pet.character, Pose::Idle1), 0, 0);
         for &(x, y) in POOP_POS.iter().take(self.poops as usize) {
-            lcd.draw(c.prop("poop1"), x, y);
+            if edge > x {
+                lcd.blit(cx.content.prop("poop1"), x, y, false, false, Some(edge - x));
+            }
         }
+        // the wave: a wavy line with a little clear water either side, so it shows over the pet
         for y in 0..16 {
-            for x in edge.max(0)..32 {
+            for x in edge - 1..=edge + 2 {
                 lcd.set(x, y, 0);
             }
             lcd.dot(edge + if y % 4 < 2 { 1 } else { 0 }, y);

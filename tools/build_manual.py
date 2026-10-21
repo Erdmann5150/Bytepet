@@ -279,8 +279,7 @@ story += [dev, Spacer(1, 4),
                  ["Click an icon", "Opens it, even from inside another menu"],
                  ["Click the screen", "B: choose"],
                  ["Scroll wheel", "Down: next item (A). Up: previous item."],
-                 ["Right-click", "C: back. On the home screen with no icon selected, it opens the settings "
-                                 "instead."],
+                 ["Right-click", "C: back, or clear the selected icon"],
                  ["Drag the shell or screen", "Moves Bytepet"]],
                 [1.8 * inch, CW - 1.8 * inch])]
 
@@ -333,8 +332,8 @@ menu.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING"
 story += [P("Living on your desktop", "h2"),
           P("Bytepet has no window frame, just the device floating above your other windows, and clicks on the "
             "empty space around it go through to whatever is behind. <b>Drag</b> the shell to move it; it "
-            "remembers its spot. <b>Right-click</b> it on the home screen, with no icon selected, to open the "
-            "settings. They appear on the device's own screen, in finer dots, so the rest of the device stays in "
+            "remembers its spot. The everyday settings are in <b>Town → SETUP</b>, and <b>MORE</b> "
+            "there opens all of them. They appear on the device's own screen, in finer dots, so the rest of the device stays in "
             "sight. Use the device's buttons: <b>A</b> moves to the next row, <b>B</b> changes or opens it and "
             "<b>C</b> goes back. With the mouse, <b>scroll</b> to pick a row, <b>click</b> to change or open it "
             "and <b>right-click</b> to go back. On the keyboard, the left and right arrows step a setting either "
@@ -597,7 +596,7 @@ custom = Table([[img("menu_shell", 1.9 * inch),
 custom.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
 story += [KeepTogether([
     P("Make it your own", "h2"),
-    P("Choose <b>SHELL</b> in the settings (right-click the home screen) for a page of its own. "
+    P("Choose <b>SHELL</b> in the settings (Town → SETUP → MORE) for a page of its own. "
       "<b>PRESET</b> steps through the designs above; the five pages below it change one part of the device "
       "each, and the rest stays as it is. Scroll to a setting and click to step to its next option, or use the "
       "<b>left</b> and <b>right</b> arrow keys to go either way. The settings stay on the screen, so you "
@@ -839,7 +838,7 @@ def quick_story():
          ["Click an icon", "Open it, even from inside another menu"],
          ["Click the screen", "B: choose"],
          ["Scroll down / up", "Next / previous option"],
-         ["Right-click", "C: back. On the home screen with nothing selected: the settings"],
+         ["Right-click", "C: back, or clear the selected icon"],
          ["Drag the shell or screen", "Move Bytepet"]],
         [0.36, 0.64])))
 
@@ -976,7 +975,7 @@ def quick_story():
                    qb("Two seniors make a rare egg, which grows into %s." % name(rare))))
 
     s.append(block("Settings",
-                   qp("Right-click the home screen, or choose Settings on the tray icon: <b>size</b>, <b>shell</b>, <b>time speed</b> "
+                   qp("Town → SETUP → MORE, or Settings on the tray icon: <b>size</b>, <b>shell</b>, <b>time speed</b> "
                       "(1×, 10×, 60×, 600×), <b>sound</b>, <b>always on top</b>, <b>notifications</b>, "
                       "<b>launch at login</b>, help, hide and quit."),
                    qp("Time keeps running while Bytepet is closed (up to 14 days). To pause it instead, set "
